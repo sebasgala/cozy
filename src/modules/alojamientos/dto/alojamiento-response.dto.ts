@@ -2,8 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { BaseResponseDto } from '../../../common/dto/base-response.dto';
 
 export class AlojamientoResponseDto extends BaseResponseDto {
-  @ApiProperty({ description: 'UUID único del alojamiento', format: 'uuid', example: '123e4567-e89b-12d3-a456-426614174000' })
-  id: string;
+  @ApiProperty({ description: 'Identificador entero del alojamiento', example: 1 })
+  id: number;
 
   @ApiProperty({ description: 'Nombre del alojamiento', example: 'Resort Las Palmas' })
   nombre: string;
