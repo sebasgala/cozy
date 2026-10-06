@@ -64,6 +64,13 @@ export class AtraccionesController {
     return { status: 'UP', timestamp: new Date().toISOString() };
   }
 
+  @Get('reservations')
+  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario' })
+  @ApiResponse({ status: 200, description: 'Listado de reservas.' })
+  getReservations(): ReservationResponseDto[] {
+    return this.atraccionesService.getReservations();
+  }
+
   @Get(':id')
   @Header('X-API-Deprecation-Date', '2027-12-31')
   @Header('Cache-Control', 'max-age=300')
@@ -121,13 +128,6 @@ export class AtraccionesController {
       throw new HttpException('Idempotency-Key header is required', HttpStatus.BAD_REQUEST);
     }
     return this.atraccionesService.cancelReservation(reservationId, dto, idempotencyKey);
-  }
-
-  @Get('reservations')
-  @ApiOperation({ summary: 'Consultar el historial de reservas del usuario' })
-  @ApiResponse({ status: 200, description: 'Listado de reservas.' })
-  getReservations(): ReservationResponseDto[] {
-    return this.atraccionesService.getReservations();
   }
 
   @Get('reservations/:reservationId')
