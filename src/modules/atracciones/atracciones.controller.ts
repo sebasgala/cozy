@@ -75,29 +75,6 @@ export class AtraccionesController {
     return this.atraccionesService.findOne(id);
   }
 
-  @Put(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Reemplazar datos de una atracción' })
-  @ApiParam({ name: 'id', description: 'UUID de la atracción', type: 'string', format: 'uuid' })
-  async replace(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateAtraccionDto) {
-    return this.atraccionesService.replace(id, dto);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Actualizar parcialmente una atracción' })
-  @ApiParam({ name: 'id', description: 'UUID de la atracción', type: 'string', format: 'uuid' })
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAtraccionDto) {
-    return this.atraccionesService.update(id, dto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Eliminar una atracción' })
-  @ApiParam({ name: 'id', description: 'UUID de la atracción', type: 'string', format: 'uuid' })
-  async delete(@Param('id', ParseUUIDPipe) id: string) {
-    return this.atraccionesService.delete(id);
-  }
-
   @Get(':id/availability')
   @ApiOperation({ summary: 'Consultar disponibilidad de cupos' })
   @ApiParam({ name: 'id', description: 'UUID de la atracción', type: 'string', format: 'uuid' })
@@ -196,6 +173,6 @@ export class AtraccionesController {
   @ApiResponse({ status: 204, description: 'La atracción ha sido eliminada correctamente.' })
   @ApiResponse({ status: 404, description: 'Not Found. La atracción no existe.' })
   remove(@Param('id', ParseUUIDPipe) id: string): void {
-    this.atraccionesService.remove(id);
+    this.atraccionesService.delete(id);
   }
 }
