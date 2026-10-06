@@ -1,18 +1,53 @@
 import {
-  Controller, Get, Post, Delete, Body, Param, Headers,
-  ParseUUIDPipe, UseGuards, HttpCode, HttpStatus, Header,
+  Controller, Get, Post, Delete, Body, Param, Headers, Res,
+  ParseUUIDPipe, UseGuards, UseFilters, HttpCode, HttpStatus, Header,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags, ApiOperation, ApiResponse, ApiParam,
-  ApiHeader, ApiSecurity,
+  ApiHeader, ApiSecurity, ApiBody, ApiExtraModels, getSchemaPath,
 } from '@nestjs/swagger';
 import { AlojamientosService } from './alojamientos.service';
 import { IdempotencyKeyGuard } from '../../common/guards/idempotency-key.guard';
+import { SearchAccommodationRequestDto, SearchAccommodationResponseDto } from './dto/search-accommodation.dto';
+import { AvailabilityRequestDto, AvailabilityResponseDto } from './dto/availability.dto';
+import { AccommodationDetailsRequestDto, AccommodationDetailsResponseDto } from './dto/accommodation-details.dto';
+import { ProblemDetailsDto } from './dto/problem-details.dto';
+import { ProblemDetailsFilter } from './problems/problem-details.filter';
+import { ConsultaInvalidaException } from './problems/problem-details.exceptions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Controlador BFF de Alojamientos — Alineado 1:1 con alojamientos-openapi.yaml
+//
+// Implementadas con datos reales: /search, /availability y /details (públicas en el
+// contrato: `security: []`, por eso no piden token). El resto sigue con datos de relleno.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Los errores del contrato son application/problem+json con el esquema ProblemDetails.
+const respuestaProblema = (status: number, description: string) => ({
+  status,
+  description,
+  content: { 'application/problem+json': { schema: { $ref: getSchemaPath(ProblemDetailsDto) } } },
+});
+
+// Cabeceras de las respuestas 200 de /search y /details según el contrato.
+const CABECERAS_200 = {
+  'Cache-Control': { description: 'Caché pública de 5 minutos', schema: { type: 'string', example: 'public, max-age=300' } },
+  'X-API-Deprecation-Date': {
+    description: 'Fecha prevista de baja de esta versión de la API',
+    schema: { type: 'string', format: 'date', example: '2027-12-31' },
+  },
+};
+
+// Valores reales de esas cabeceras. Se asignan solo cuando la respuesta es 200: un error no debe cachearse.
+const CABECERAS_CATALOGO = {
+  'Cache-Control': 'public, max-age=300',
+  'X-API-Deprecation-Date': '2027-12-31',
+};
+
+const BOOKER_EJEMPLO = { country: 'ec', platform: 'desktop' };
+
+@ApiExtraModels(ProblemDetailsDto)
 @Controller()
 export class AlojamientosController {
   constructor(private readonly alojamientosService: AlojamientosService) {}
@@ -22,26 +57,86 @@ export class AlojamientosController {
   // ══════════════════════════════════════════════════════════════════════════
 
   @Post('search')
+  @HttpCode(HttpStatus.OK)
+  @UseFilters(ProblemDetailsFilter)
   @ApiTags('Búsqueda y Catálogo')
-  @ApiOperation({ summary: 'Búsqueda de alojamientos' })
-  @ApiHeader({ name: 'X-Device-Fingerprint', required: true })
-  @ApiResponse({ status: 200, description: 'Alojamientos encontrados' })
-  @ApiResponse({ status: 400, description: 'Petición inválida' })
-  @ApiResponse({ status: 429, description: 'Demasiadas peticiones' })
-  @Header('Cache-Control', 'public, max-age=300')
-  search(
+  @ApiOperation({
+    summary: 'Búsqueda de alojamientos',
+    description:
+      'Devuelve los alojamientos activos con al menos una habitación libre todas las noches de [checkin, checkout) ' +
+      'donde caben los huéspedes. Filtra por `city` (id entero) y/o `country`. Paginado con `rows` y `page`/`next_page`. ' +
+      'No se convierte moneda: `currency`, `extras`, `booker` y `allocation` se validan pero no cambian el resultado.',
+  })
+  @ApiHeader({ name: 'X-Device-Fingerprint', required: true, description: 'Identificador del dispositivo', example: 'dev-1234' })
+  @ApiBody({
+    type: SearchAccommodationRequestDto,
+    examples: {
+      'Quito, 3 noches (incluye fin de semana)': {
+        value: {
+          booker: BOOKER_EJEMPLO,
+          checkin: '2026-10-09',
+          checkout: '2026-10-12',
+          city: 1,
+          guests: { number_of_adults: 2, number_of_rooms: 1, children: [5] },
+          rows: 10,
+        },
+      },
+      'Todo Ecuador, sin niños': {
+        value: {
+          booker: BOOKER_EJEMPLO,
+          checkin: '2026-10-20',
+          checkout: '2026-10-22',
+          country: 'ec',
+          guests: { number_of_adults: 1, number_of_rooms: 1 },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Alojamientos encontrados', type: SearchAccommodationResponseDto, headers: CABECERAS_200 })
+  @ApiResponse(respuestaProblema(400, 'Petición inválida (campos faltantes o mal formados, checkout no posterior a checkin, cabecera ausente)'))
+  @ApiResponse({ status: 429, description: 'Demasiadas peticiones (pendiente: todavía no hay límite de tasa)' })
+  async search(
     @Headers('X-Device-Fingerprint') deviceFingerprint: string,
-    @Body() searchRequest: any,
+    @Body() searchRequest: SearchAccommodationRequestDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.alojamientosService.search(searchRequest);
+    if (!deviceFingerprint?.trim()) {
+      throw new ConsultaInvalidaException([{ name: 'X-Device-Fingerprint', reason: 'La cabecera X-Device-Fingerprint es obligatoria' }]);
+    }
+    const resultado = await this.alojamientosService.search(searchRequest);
+    res.set(CABECERAS_CATALOGO);
+    return resultado;
   }
 
   @Post('availability')
+  @HttpCode(HttpStatus.OK)
+  @UseFilters(ProblemDetailsFilter)
   @ApiTags('Disponibilidad y Precios')
-  @ApiOperation({ summary: 'Consultar disponibilidad y precio de un alojamiento' })
-  @ApiResponse({ status: 200, description: 'Disponibilidad y detalles del precio' })
-  @ApiResponse({ status: 400, description: 'Petición inválida' })
-  availability(@Body() availabilityRequest: any) {
+  @ApiOperation({
+    summary: 'Consultar disponibilidad y precio de un alojamiento',
+    description:
+      'Habitaciones del alojamiento libres todas las noches de [checkin, checkout) donde caben los huéspedes. ' +
+      '`price.total` es la suma de las noches de disponibilidad_diaria, por habitación, en la moneda del alojamiento. ' +
+      'Un alojamiento inexistente o inactivo responde 404.',
+  })
+  @ApiBody({
+    type: AvailabilityRequestDto,
+    examples: {
+      'Cozy Boutique Quito, fin de semana': {
+        value: {
+          accommodation: 1,
+          booker: BOOKER_EJEMPLO,
+          checkin: '2026-10-09',
+          checkout: '2026-10-12',
+          guests: { number_of_adults: 2, number_of_rooms: 1, children: [5] },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Disponibilidad y detalles del precio', type: AvailabilityResponseDto })
+  @ApiResponse(respuestaProblema(400, 'Petición inválida'))
+  @ApiResponse(respuestaProblema(404, 'El alojamiento no existe o está inactivo (no está definido en el contrato)'))
+  availability(@Body() availabilityRequest: AvailabilityRequestDto) {
     return this.alojamientosService.checkAvailability(availabilityRequest);
   }
 
@@ -54,12 +149,30 @@ export class AlojamientosController {
   }
 
   @Post('details')
+  @HttpCode(HttpStatus.OK)
+  @UseFilters(ProblemDetailsFilter)
   @ApiTags('Búsqueda y Catálogo')
-  @ApiOperation({ summary: 'Obtener detalles extendidos de los alojamientos' })
-  @ApiResponse({ status: 200, description: 'Detalles de los alojamientos solicitados' })
-  @Header('Cache-Control', 'public, max-age=300')
-  getDetails(@Body() detailsRequest: any) {
-    return this.alojamientosService.getDetails(detailsRequest);
+  @ApiOperation({
+    summary: 'Obtener detalles extendidos de los alojamientos',
+    description:
+      'Ficha de los alojamientos activos: por `accommodations` (ids enteros; si alguno no existe o está inactivo, 404) ' +
+      'o por `city`/`country`. `extras` elige los bloques (description, photos, facilities, policies, rooms); ' +
+      'si se omite se devuelven todos. `bundles` y `payment` no existen en nuestro modelo y se ignoran.',
+  })
+  @ApiBody({
+    type: AccommodationDetailsRequestDto,
+    examples: {
+      'Ficha completa de dos alojamientos': { value: { accommodations: [1, 3] } },
+      'Solo fotos y habitaciones de una ciudad': { value: { city: 1, extras: ['photos', 'rooms'] } },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Detalles de los alojamientos solicitados', type: AccommodationDetailsResponseDto, headers: CABECERAS_200 })
+  @ApiResponse(respuestaProblema(400, 'Petición inválida'))
+  @ApiResponse(respuestaProblema(404, 'Algún alojamiento pedido no existe o está inactivo (no está definido en el contrato)'))
+  async getDetails(@Body() detailsRequest: AccommodationDetailsRequestDto, @Res({ passthrough: true }) res: Response) {
+    const resultado = await this.alojamientosService.getDetails(detailsRequest);
+    res.set(CABECERAS_CATALOGO);
+    return resultado;
   }
 
   @Post('details/changes')
