@@ -6,12 +6,7 @@ import { Alojamiento } from './entities/alojamiento.entity';
 import { DisponibilidadDiaria } from './entities/disponibilidad-diaria.entity';
 import { Habitacion } from './entities/habitacion.entity';
 import { SearchAccommodationRequestDto, SearchAccommodationResponseDto } from './dto/search-accommodation.dto';
-import {
-  AvailabilityProductDto,
-  AvailabilityRequestDto,
-  AvailabilityResponseDto,
-  NightPriceDto,
-} from './dto/availability.dto';
+import { AvailabilityProductDto, AvailabilityRequestDto, AvailabilityResponseDto } from './dto/availability.dto';
 import {
   AccommodationDetailsItemDto,
   AccommodationDetailsRequestDto,
@@ -20,7 +15,6 @@ import {
 } from './dto/accommodation-details.dto';
 import { RecursoNoEncontradoException } from './problems/problem-details.exceptions';
 import {
-  acotarEntero,
   calcularNoches,
   codificarPagina,
   decodificarPagina,
@@ -28,6 +22,7 @@ import {
   repartirHuespedes,
   urlAlojamiento,
 } from './alojamientos-consulta.utils';
+import { DisponibilidadService } from './disponibilidad.service';
 
 @Injectable()
 export class AlojamientosService {
@@ -36,6 +31,7 @@ export class AlojamientosService {
     private readonly alojamientosRepository: Repository<Alojamiento>,
     @InjectRepository(Habitacion)
     private readonly habitacionesRepository: Repository<Habitacion>,
+    private readonly disponibilidadService: DisponibilidadService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -130,57 +126,27 @@ export class AlojamientosService {
   async checkAvailability(availabilityRequest: AvailabilityRequestDto): Promise<AvailabilityResponseDto> {
     const noches = calcularNoches(availabilityRequest.checkin, availabilityRequest.checkout);
     const reparto = repartirHuespedes(availabilityRequest.guests);
-    const alojamiento = await this.buscarActivo(availabilityRequest.accommodation, 'accommodation');
+    const alojamiento = await this.disponibilidadService.buscarAlojamientoActivo(availabilityRequest.accommodation, 'accommodation');
 
-    const filas = await this.habitacionesRepository
-      .createQueryBuilder('h')
-      .innerJoin(DisponibilidadDiaria, 'd', 'd.habitacionId = h.id')
-      .select('h.id', 'id')
-      .addSelect('h.nombre', 'nombre')
-      .addSelect('h.tipo', 'tipo')
-      .addSelect('h.mealPlan', 'mealPlan')
-      .addSelect('h.cancellationType', 'cancellationType')
-      .addSelect('h.capacidadAdultos', 'capacidadAdultos')
-      .addSelect('h.capacidadNinos', 'capacidadNinos')
-      .addSelect('SUM(d.precio)', 'total')
-      .addSelect('MIN(d.cupos)', 'cuposMinimos')
-      .addSelect("json_agg(json_build_object('date', d.fecha, 'price', d.precio) ORDER BY d.fecha)", 'desglose')
-      .where('h.alojamientoId = :alojamiento', { alojamiento: alojamiento.id })
-      .andWhere('h.capacidadAdultos >= :adultos', { adultos: reparto.adultosPorHabitacion })
-      .andWhere('h.capacidadNinos >= :ninos', { ninos: reparto.ninosPorHabitacion })
-      .andWhere('d.fecha >= :checkin AND d.fecha < :checkout', {
-        checkin: availabilityRequest.checkin,
-        checkout: availabilityRequest.checkout,
-      })
-      .andWhere('d.cupos >= :habitaciones', { habitaciones: reparto.habitaciones })
-      .groupBy('h.id')
-      .having('COUNT(*) = :noches', { noches })
-      .getRawMany<{
-        id: string;
-        nombre: string;
-        tipo: string;
-        mealPlan: string | null;
-        cancellationType: string | null;
-        capacidadAdultos: number;
-        capacidadNinos: number;
-        total: string;
-        cuposMinimos: number;
-        desglose: NightPriceDto[];
-      }>();
+    const disponibles = await this.disponibilidadService.habitacionesDisponibles({
+      alojamientoId: alojamiento.id,
+      checkin: availabilityRequest.checkin,
+      checkout: availabilityRequest.checkout,
+      noches,
+      reparto,
+    });
 
-    const products: AvailabilityProductDto[] = filas
-      .map((fila) => ({
-        product_id: fila.id,
-        name: fila.nombre,
-        type: fila.tipo,
-        meal_plan: fila.mealPlan,
-        cancellation_type: fila.cancellationType,
-        max_adults: Number(fila.capacidadAdultos),
-        max_children: Number(fila.capacidadNinos),
-        rooms_left: Number(fila.cuposMinimos),
-        price: { currency: alojamiento.moneda, total: Number(fila.total), nights: fila.desglose },
-      }))
-      .sort((a, b) => a.price.total - b.price.total || a.name.localeCompare(b.name));
+    const products: AvailabilityProductDto[] = disponibles.map((h) => ({
+      product_id: h.id,
+      name: h.nombre,
+      type: h.tipo,
+      meal_plan: h.mealPlan,
+      cancellation_type: h.cancellationType,
+      max_adults: h.capacidadAdultos,
+      max_children: h.capacidadNinos,
+      rooms_left: h.cuposMinimos,
+      price: { currency: alojamiento.moneda, total: h.total, nights: h.noches },
+    }));
 
     return {
       request_id: randomUUID(),
@@ -269,31 +235,11 @@ export class AlojamientosService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  Gestión de Órdenes (Reservas)
+  //  Gestión de Órdenes (Reservas): preview, create, get y cancel están en OrdenesService
   // ═══════════════════════════════════════════════════════════════════════
-
-  previewOrder(previewRequest: any): any {
-    // TODO: Implementar previsualización de orden (precio final antes de pagar)
-    return { request_id: '', data: {} };
-  }
-
-  createOrder(createRequest: any): any {
-    // TODO: Implementar creación formal de reserva/orden
-    return {};
-  }
-
-  getOrder(orderId: string): any {
-    // TODO: Implementar obtención de detalle de orden por ID
-    return {};
-  }
 
   modifyOrder(orderId: string, modifyRequest: any): any {
     // TODO: Implementar modificación de orden existente
-    return {};
-  }
-
-  cancelOrder(orderId: string): any {
-    // TODO: Implementar cancelación de orden
     return {};
   }
 
@@ -313,19 +259,5 @@ export class AlojamientosService {
 
   deleteWebhook(id: string): void {
     // TODO: Implementar eliminación de suscripción de webhook
-  }
-
-  // ───────────────────────── Apoyo ─────────────────────────
-
-  // Un alojamiento inactivo cuenta como inexistente para las rutas del contrato.
-  private async buscarActivo(id: number, parametro: string): Promise<Alojamiento> {
-    const alojamiento = esIdPosible(id)
-      ? await this.alojamientosRepository.findOneBy({ id: acotarEntero(id), activo: true })
-      : null;
-    if (!alojamiento) {
-      const reason = `El alojamiento ${id} no existe o está inactivo`;
-      throw new RecursoNoEncontradoException(reason, [{ name: parametro, reason }]);
-    }
-    return alojamiento;
   }
 }

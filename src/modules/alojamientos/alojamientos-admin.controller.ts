@@ -19,7 +19,7 @@ import { AlojamientoResponseDto, PaginatedAlojamientosResponseDto } from './dto/
 // Orden de rutas: las fijas (POST / y GET /) van antes de las rutas con :id.
 // ─────────────────────────────────────────────────────────────────────────────
 
-@ApiTags('Administración - Alojamientos')
+@ApiTags('Interno - Admin')
 @Controller('alojamientos')
 export class AlojamientosAdminController {
   constructor(private readonly alojamientosAdminService: AlojamientosAdminService) {}

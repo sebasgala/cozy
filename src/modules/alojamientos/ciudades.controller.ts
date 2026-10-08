@@ -6,7 +6,7 @@ import { CiudadResponseDto } from './dto/ciudad-response.dto';
 
 // Ciudades mínimas para poder elegir ciudadId al crear alojamientos.
 // PENDIENTE: autenticación y roles (ver AlojamientosAdminController).
-@ApiTags('Administración - Ciudades')
+@ApiTags('Interno - Admin')
 @Controller('ciudades')
 export class CiudadesController {
   constructor(private readonly ciudadesService: CiudadesService) {}

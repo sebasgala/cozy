@@ -7,7 +7,7 @@ import { IsFechaIso } from './decorators/is-fecha-iso.decorator';
 
 // Esquema `AvailabilityRequest` del contrato.
 export class AvailabilityRequestDto {
-  @ApiProperty({ description: 'Id (entero) del alojamiento', example: 1, minimum: 1 })
+  @ApiProperty({ type: 'integer', description: 'Id (entero) del alojamiento', example: 1, minimum: 1 })
   @IsInt()
   @Min(1)
   accommodation: number;
@@ -66,7 +66,12 @@ export class ProductPriceDto {
 
 // Elemento de `products`: el contrato lo deja como objeto libre; este es el formato que usamos.
 export class AvailabilityProductDto {
-  @ApiProperty({ description: 'UUID de la habitación (texto)', example: 'e2a1c6a0-2a4e-4b8e-9d57-0d6a3a3f5b10' })
+  @ApiProperty({
+    description:
+      'Oferta concreta (habitación + fechas de la solicitud): `<uuid-de-la-habitación>:<checkin>:<checkout>`, fechas YYYY-MM-DD. ' +
+      'Se envía tal cual a /orders/preview.',
+    example: 'e2a1c6a0-2a4e-4b8e-9d57-0d6a3a3f5b10:2026-10-09:2026-10-12',
+  })
   product_id: string;
 
   @ApiProperty({ example: 'Suite Junior' })
@@ -81,13 +86,13 @@ export class AvailabilityProductDto {
   @ApiProperty({ example: 'free_cancellation', nullable: true })
   cancellation_type: string | null;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ type: 'integer', example: 2 })
   max_adults: number;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ type: 'integer', example: 2 })
   max_children: number;
 
-  @ApiProperty({ description: 'Habitaciones libres: el mínimo de cupos de todas las noches', example: 4 })
+  @ApiProperty({ type: 'integer', description: 'Habitaciones libres: el mínimo de cupos de todas las noches', example: 4 })
   rooms_left: number;
 
   @ApiProperty({ type: () => ProductPriceDto })
@@ -95,7 +100,7 @@ export class AvailabilityProductDto {
 }
 
 export class AvailabilityDataDto {
-  @ApiProperty({ description: 'Id (entero) del alojamiento', example: 1 })
+  @ApiProperty({ type: 'integer', description: 'Id (entero) del alojamiento', example: 1 })
   id: number;
 
   @ApiProperty({ example: 'USD' })

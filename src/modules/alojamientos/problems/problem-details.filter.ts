@@ -1,13 +1,23 @@
-import { ArgumentsHost, BadRequestException, Catch, ExceptionFilter, HttpException, NotFoundException } from '@nestjs/common';
+import {
+  ArgumentsHost, BadRequestException, Catch, ConflictException, ExceptionFilter, HttpException, NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Response } from 'express';
-import { ConsultaInvalidaException, InvalidParam, RecursoNoEncontradoException } from './problem-details.exceptions';
+import { InvalidParam } from './problem-details.exceptions';
 
 const DETALLE_VALIDACION = 'La petición contiene parámetros inválidos';
 
-// Convierte los errores 400 y 404 de una ruta al formato ProblemDetails del contrato
+const TITULOS: Record<number, string> = {
+  400: 'Petición inválida',
+  404: 'No encontrado',
+  409: 'Conflicto',
+  422: 'Petición no procesable',
+};
+
+// Convierte los errores 400, 404, 409 y 422 de una ruta al formato ProblemDetails del contrato
 // (application/problem+json). Se aplica con @UseFilters solo en las rutas del contrato,
 // así el CRUD de administración conserva el formato de error por defecto de NestJS.
-@Catch(BadRequestException, NotFoundException)
+@Catch(BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException)
 export class ProblemDetailsFilter implements ExceptionFilter {
   catch(exception: HttpException, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
@@ -16,11 +26,12 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     const problema = {
       type: 'about:blank',
-      title: status === 404 ? 'No encontrado' : 'Petición inválida',
+      title: TITULOS[status] ?? 'Error',
       status,
       detail,
-      // El enum `code` del contrato no tiene un valor para "no encontrado": se usa el más cercano.
-      code: 'VALIDATION_FAILED',
+      // El enum `code` del contrato no tiene valores para "no encontrado" ni para la clave reutilizada:
+      // en esos casos se usa VALIDATION_FAILED, el más cercano.
+      code: (exception as { code?: string }).code ?? 'VALIDATION_FAILED',
       ...(invalidParams.length > 0 && { invalidParams }),
     };
 
@@ -29,8 +40,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
   private interpretar(exception: HttpException): { detail: string; invalidParams: InvalidParam[] } {
     // Excepciones propias: ya traen el detalle y los parámetros.
-    if (exception instanceof ConsultaInvalidaException || exception instanceof RecursoNoEncontradoException) {
-      return { detail: this.mensaje(exception), invalidParams: exception.invalidParams };
+    const propios = (exception as { invalidParams?: InvalidParam[] }).invalidParams;
+    if (propios) {
+      return { detail: this.mensaje(exception), invalidParams: propios };
     }
     // Errores del ValidationPipe global: `message` es una lista de textos de class-validator.
     if (exception instanceof BadRequestException) {

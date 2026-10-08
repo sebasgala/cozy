@@ -4,12 +4,12 @@ import { IsArray, IsInt, IsOptional, Min, ValidateNested } from 'class-validator
 
 // Elemento de `allocation` del contrato: cómo se reparten los huéspedes en una habitación.
 export class GuestsAllocationDto {
-  @ApiPropertyOptional({ example: 2 })
+  @ApiPropertyOptional({ type: 'integer', example: 2 })
   @IsOptional()
   @IsInt()
   adults?: number;
 
-  @ApiPropertyOptional({ type: [Number], example: [5] })
+  @ApiPropertyOptional({ type: 'integer', isArray: true, example: [5] })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -18,17 +18,17 @@ export class GuestsAllocationDto {
 
 // Esquema `AccommodationsGuests` del contrato.
 export class AccommodationsGuestsDto {
-  @ApiProperty({ description: 'Cantidad de adultos (mínimo 1)', example: 2, minimum: 1 })
+  @ApiProperty({ type: 'integer', description: 'Cantidad de adultos (mínimo 1)', example: 2, minimum: 1 })
   @IsInt()
   @Min(1)
   number_of_adults: number;
 
-  @ApiProperty({ description: 'Cantidad de habitaciones (mínimo 1)', example: 1, minimum: 1 })
+  @ApiProperty({ type: 'integer', description: 'Cantidad de habitaciones (mínimo 1)', example: 1, minimum: 1 })
   @IsInt()
   @Min(1)
   number_of_rooms: number;
 
-  @ApiPropertyOptional({ description: 'Edades de los niños', type: [Number], example: [5] })
+  @ApiPropertyOptional({ description: 'Edades de los niños', type: 'integer', isArray: true, example: [5] })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })

@@ -16,7 +16,7 @@ export class ProblemDetailsDto {
   @ApiProperty({ example: 'Petición inválida' })
   title: string;
 
-  @ApiProperty({ example: 400 })
+  @ApiProperty({ type: 'integer', example: 400 })
   status: number;
 
   @ApiPropertyOptional({ example: 'La petición contiene parámetros inválidos' })

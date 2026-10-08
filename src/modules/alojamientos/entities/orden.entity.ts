@@ -77,10 +77,10 @@ export class Orden {
   @Column({ type: 'varchar', length: 255 })
   paymentReference: string;
 
-  // Sub del token JWT del dueño de la reserva
+  // Sub del token JWT del dueño de la reserva. Queda null mientras no exista autenticación.
   @Index()
-  @Column({ type: 'varchar', length: 255 })
-  ownerId: string;
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  ownerId: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

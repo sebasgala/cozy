@@ -12,8 +12,14 @@ export class IdempotencyKey {
   @Column({ type: 'int' })
   statusCode: number;
 
-  @Column({ type: 'jsonb', nullable: true })
+  // `json` (no `jsonb`): conserva el texto tal cual, con el mismo orden de claves, para que un
+  // reintento devuelva exactamente la misma respuesta.
+  @Column({ type: 'json', nullable: true })
   responseBody: Record<string, any> | null;
+
+  // SHA-256 del cuerpo de la petición: detecta la misma clave usada con un cuerpo distinto.
+  @Column({ type: 'varchar', length: 64 })
+  requestHash: string;
 
   @CreateDateColumn()
   createdAt: Date;

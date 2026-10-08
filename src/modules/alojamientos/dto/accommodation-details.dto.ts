@@ -5,13 +5,13 @@ export const DETAILS_EXTRAS = ['description', 'bundles', 'facilities', 'payment'
 
 // Esquema `AccommodationDetailsRequest` del contrato (todos los campos son opcionales).
 export class AccommodationDetailsRequestDto {
-  @ApiPropertyOptional({ description: 'Ids (enteros) de los alojamientos. Si se envía, se ignoran city y country', type: [Number], example: [1, 3] })
+  @ApiPropertyOptional({ description: 'Ids (enteros) de los alojamientos. Si se envía, se ignoran city y country', type: 'integer', isArray: true, example: [1, 3] })
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   accommodations?: number[];
 
-  @ApiPropertyOptional({ description: 'Id (entero) de la ciudad', example: 1 })
+  @ApiPropertyOptional({ type: 'integer', description: 'Id (entero) de la ciudad', example: 1 })
   @IsOptional()
   @IsInt()
   city?: number;
@@ -40,7 +40,7 @@ export class AccommodationDetailsRequestDto {
 }
 
 export class DetailsRoomDto {
-  @ApiProperty({ description: 'UUID de la habitación (texto)', example: 'e2a1c6a0-2a4e-4b8e-9d57-0d6a3a3f5b10' })
+  @ApiProperty({ description: 'UUID de la habitación (texto). Aquí no hay fechas: para reservar usa el product_id de /availability', example: 'e2a1c6a0-2a4e-4b8e-9d57-0d6a3a3f5b10' })
   product_id: string;
 
   @ApiProperty({ example: 'Suite Junior' })
@@ -49,10 +49,10 @@ export class DetailsRoomDto {
   @ApiProperty({ example: 'suite' })
   type: string;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ type: 'integer', example: 2 })
   max_adults: number;
 
-  @ApiProperty({ example: 2 })
+  @ApiProperty({ type: 'integer', example: 2 })
   max_children: number;
 
   @ApiProperty({ description: 'Precio base de catálogo (el precio real sale de /availability)', example: 95 })
@@ -66,7 +66,7 @@ export class DetailsRoomDto {
 }
 
 export class DetailsCityDto {
-  @ApiProperty({ example: 1 })
+  @ApiProperty({ type: 'integer', example: 1 })
   id: number;
 
   @ApiProperty({ example: 'Quito' })
@@ -78,7 +78,7 @@ export class DetailsCityDto {
 
 // Elemento de `data`: el contrato lo deja como objeto libre; los bloques opcionales dependen de `extras`.
 export class AccommodationDetailsItemDto {
-  @ApiProperty({ example: 1 })
+  @ApiProperty({ type: 'integer', example: 1 })
   id: number;
 
   @ApiProperty({ example: 'Cozy Boutique Quito' })

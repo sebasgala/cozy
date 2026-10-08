@@ -124,6 +124,12 @@ erDiagram
 - **Lo que queda fuera por ahora:** pagos, huéspedes como tabla aparte, reseñas, webhooks y cadenas hoteleras. Los datos del cliente van dentro de `ordenes`.
 - **Borrado:** al borrar un alojamiento se borran sus habitaciones, y al borrar una habitación su disponibilidad (`ON DELETE CASCADE`). Las órdenes no se borran en cascada.
 
+## Cupos: cuándo se descuentan y cuándo se devuelven
+
+- `POST /orders/preview` **no** toca los cupos: solo comprueba disponibilidad, calcula el precio y guarda la vista previa (vale 15 minutos).
+- `POST /orders/create` descuenta, en **una transacción**, `number_of_rooms` cupos de cada noche de `[checkin, checkout)`. Primero bloquea esas filas de `disponibilidad_diaria` (`SELECT ... FOR UPDATE`, en orden de fecha), vuelve a verificar cupos y precio, descuenta, crea la orden y guarda la `Idempotency-Key`. Si algo falla, se deshace todo y no queda ningún cupo descontado. Dos reservas simultáneas por el último cupo: la segunda espera el bloqueo, ya no encuentra cupo y recibe `409 ROOM_NO_LONGER_AVAILABLE`.
+- `POST /orders/{orderId}/cancel` devuelve, en una transacción y con la orden bloqueada, los mismos cupos a cada noche y pasa la orden a `CANCELLED`. Cancelar una orden ya cancelada no devuelve cupos otra vez.
+
 ## Datos de prueba (seed)
 
 ```bash

@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+import { isUUID } from 'class-validator';
 import { ConsultaInvalidaException } from './problems/problem-details.exceptions';
 
 // Mayor valor que cabe en una columna integer de PostgreSQL
@@ -54,4 +56,43 @@ export function decodificarPagina(page?: string): number {
 
 export function urlAlojamiento(id: number): string {
   return `/api/v1/alojamientos/${id}`;
+}
+
+// Un texto que no es UUID no puede existir en una columna uuid (y PostgreSQL fallaría al compararlo).
+export function esUuid(valor: unknown): valor is string {
+  return typeof valor === 'string' && isUUID(valor);
+}
+
+// Cabecera Idempotency-Key del contrato: obligatoria y con formato UUID.
+export function validarIdempotencyKey(valor: string | undefined): string {
+  const clave = valor?.trim();
+  if (!clave) {
+    throw new ConsultaInvalidaException([{ name: 'Idempotency-Key', reason: 'La cabecera Idempotency-Key es obligatoria' }]);
+  }
+  if (!esUuid(clave)) {
+    throw new ConsultaInvalidaException([{ name: 'Idempotency-Key', reason: 'La cabecera Idempotency-Key debe ser un UUID' }]);
+  }
+  return clave.toLowerCase();
+}
+
+// Precio de una orden: el precio por habitación de toda la estancia (mismo criterio de /availability)
+// multiplicado por las habitaciones pedidas. Con 1 habitación es exactamente ese precio.
+export function precioOrden(totalPorHabitacion: number, habitaciones: number): number {
+  return Math.round(totalPorHabitacion * habitaciones * 100) / 100;
+}
+
+// Huella del cuerpo: SHA-256 de su JSON con las claves ordenadas, así el orden de los campos no importa.
+export function huellaDePeticion(cuerpo: unknown): string {
+  const ordenar = (valor: unknown): unknown => {
+    if (Array.isArray(valor)) return valor.map(ordenar);
+    if (valor && typeof valor === 'object') {
+      return Object.fromEntries(
+        Object.keys(valor as object)
+          .sort()
+          .map((clave) => [clave, ordenar((valor as Record<string, unknown>)[clave])]),
+      );
+    }
+    return valor;
+  };
+  return createHash('sha256').update(JSON.stringify(ordenar(cuerpo))).digest('hex');
 }

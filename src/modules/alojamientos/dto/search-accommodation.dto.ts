@@ -21,7 +21,7 @@ export class SearchAccommodationRequestDto {
   @IsFechaIso()
   checkout: string;
 
-  @ApiPropertyOptional({ description: 'Id (entero) de la ciudad', example: 1 })
+  @ApiPropertyOptional({ type: 'integer', description: 'Id (entero) de la ciudad', example: 1 })
   @IsOptional()
   @IsInt()
   city?: number;
@@ -50,7 +50,7 @@ export class SearchAccommodationRequestDto {
   @Matches(/^[A-Z]{3}$/, { message: 'currency debe ser un código ISO de 3 letras mayúsculas (ej. "USD")' })
   currency?: string;
 
-  @ApiPropertyOptional({ description: 'Resultados por página', minimum: 10, maximum: 100, default: 100, example: 10 })
+  @ApiPropertyOptional({ type: 'integer', description: 'Resultados por página', minimum: 10, maximum: 100, default: 100, example: 10 })
   @IsOptional()
   @IsInt()
   @Min(10)
@@ -64,7 +64,7 @@ export class SearchAccommodationRequestDto {
 }
 
 export class SearchResultItemDto {
-  @ApiProperty({ description: 'Id (entero) del alojamiento', example: 1 })
+  @ApiProperty({ type: 'integer', description: 'Id (entero) del alojamiento', example: 1 })
   id: number;
 
   @ApiProperty({ description: 'Enlace al alojamiento', example: '/api/v1/alojamientos/1' })
