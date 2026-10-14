@@ -81,6 +81,45 @@ export function precioOrden(totalPorHabitacion: number, habitaciones: number): n
   return Math.round(totalPorHabitacion * habitaciones * 100) / 100;
 }
 
+// ───────────────────────── product_id ─────────────────────────
+// El product_id del contrato es un texto que define cada sistema: aquí representa una oferta concreta,
+// o sea habitación + fechas, con el formato  <uuid-de-la-habitación>:<checkin>:<checkout>
+// (fechas YYYY-MM-DD). Es el único lugar donde se construye y se interpreta.
+
+export interface ProductId {
+  habitacionId: string;
+  checkin: string;
+  checkout: string;
+}
+
+export function construirProductId(habitacionId: string, checkin: string, checkout: string): string {
+  return `${habitacionId}:${checkin}:${checkout}`;
+}
+
+const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+const esFechaValida = (fecha: string) => {
+  if (!FECHA_ISO.test(fecha)) return false;
+  const d = new Date(`${fecha}T00:00:00Z`);
+  // Una fecha imposible (mes 13, día 45) da Invalid Date; 2026-02-30 se desplaza y ya no coincide
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(fecha);
+};
+
+// Interpretación estricta: tres partes, UUID válido, fechas reales y checkout posterior a checkin.
+export function interpretarProductId(valor: unknown): ProductId {
+  const error = (reason: string) =>
+    new ConsultaInvalidaException([
+      { name: 'product_id', reason: `${reason}. El product_id debe obtenerse de /availability (formato <uuid-habitacion>:<checkin>:<checkout>)` },
+    ]);
+  if (typeof valor !== 'string') throw error('product_id debe ser un texto');
+  const partes = valor.split(':');
+  if (partes.length !== 3) throw error('product_id no tiene el formato esperado de tres partes');
+  const [habitacionId, checkin, checkout] = partes;
+  if (!esUuid(habitacionId)) throw error('La primera parte de product_id no es un UUID válido');
+  if (!esFechaValida(checkin) || !esFechaValida(checkout)) throw error('Las fechas de product_id deben ser YYYY-MM-DD válidas');
+  if (checkout <= checkin) throw error('El checkout de product_id debe ser posterior al checkin');
+  return { habitacionId: habitacionId.toLowerCase(), checkin, checkout };
+}
+
 // Huella del cuerpo: SHA-256 de su JSON con las claves ordenadas, así el orden de los campos no importa.
 export function huellaDePeticion(cuerpo: unknown): string {
   const ordenar = (valor: unknown): unknown => {

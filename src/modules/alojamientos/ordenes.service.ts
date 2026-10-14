@@ -17,7 +17,7 @@ import {
   ConsultaInvalidaException,
   RecursoNoEncontradoException,
 } from './problems/problem-details.exceptions';
-import { calcularNoches, esUuid, huellaDePeticion, precioOrden, repartirHuespedes } from './alojamientos-consulta.utils';
+import { calcularNoches, esUuid, huellaDePeticion, interpretarProductId, precioOrden, repartirHuespedes } from './alojamientos-consulta.utils';
 
 // El contrato no dice cuánto dura una vista previa: 15 minutos.
 const MINUTOS_VIGENCIA_PREVIEW = 15;
@@ -50,15 +50,15 @@ export class OrdenesService {
 
   // Comprueba disponibilidad y calcula el precio con la función compartida. No descuenta cupos.
   async preview(request: OrderPreviewRequestDto): Promise<OrderPreviewResponseDto> {
-    const noches = calcularNoches(request.checkin, request.checkout);
+    // El product_id ya trae la habitación y las fechas (formato <uuid>:<checkin>:<checkout>).
+    const oferta = interpretarProductId(request.product_id);
+    const noches = calcularNoches(oferta.checkin, oferta.checkout);
     const reparto = repartirHuespedes(request.guests);
     const alojamiento = await this.disponibilidadService.buscarAlojamientoActivo(request.accommodation_id, 'accommodation_id');
 
-    const habitacion = esUuid(request.product_id)
-      ? await this.habitacionesRepository.findOneBy({ id: request.product_id, alojamientoId: alojamiento.id })
-      : null;
+    const habitacion = await this.habitacionesRepository.findOneBy({ id: oferta.habitacionId, alojamientoId: alojamiento.id });
     if (!habitacion) {
-      const reason = `La habitación ${request.product_id} no existe en el alojamiento ${alojamiento.id}`;
+      const reason = `La habitación ${oferta.habitacionId} no existe en el alojamiento ${alojamiento.id}`;
       throw new RecursoNoEncontradoException(reason, [{ name: 'product_id', reason }]);
     }
     if (habitacion.capacidadAdultos < reparto.adultosPorHabitacion || habitacion.capacidadNinos < reparto.ninosPorHabitacion) {
@@ -73,8 +73,8 @@ export class OrdenesService {
     const [disponible] = await this.disponibilidadService.habitacionesDisponibles({
       alojamientoId: alojamiento.id,
       habitacionId: habitacion.id,
-      checkin: request.checkin,
-      checkout: request.checkout,
+      checkin: oferta.checkin,
+      checkout: oferta.checkout,
       noches,
       reparto,
     });
@@ -89,8 +89,8 @@ export class OrdenesService {
         alojamientoId: alojamiento.id,
         habitacionId: habitacion.id,
         guests: { ...request.guests },
-        checkin: request.checkin,
-        checkout: request.checkout,
+        checkin: oferta.checkin,
+        checkout: oferta.checkout,
         totalPrice: precioOrden(disponible.total, reparto.habitaciones),
         currency: alojamiento.moneda,
         expiresAt: new Date(Date.now() + MINUTOS_VIGENCIA_PREVIEW * 60 * 1000),

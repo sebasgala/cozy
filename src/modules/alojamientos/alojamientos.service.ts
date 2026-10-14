@@ -15,6 +15,7 @@ import {
 } from './dto/accommodation-details.dto';
 import { RecursoNoEncontradoException } from './problems/problem-details.exceptions';
 import {
+  construirProductId,
   calcularNoches,
   codificarPagina,
   decodificarPagina,
@@ -137,7 +138,7 @@ export class AlojamientosService {
     });
 
     const products: AvailabilityProductDto[] = disponibles.map((h) => ({
-      product_id: h.id,
+      product_id: construirProductId(h.id, availabilityRequest.checkin, availabilityRequest.checkout),
       name: h.nombre,
       type: h.tipo,
       meal_plan: h.mealPlan,
