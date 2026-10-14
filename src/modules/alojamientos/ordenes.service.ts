@@ -275,6 +275,8 @@ export class OrdenesService {
       if (!orden) throw this.ordenNoEncontrada(orderId);
       if (orden.status === OrdenStatus.CANCELLED) return;
 
+      // Mismo orden de bloqueo que el create y que la edición del admin (por fecha): evita bloqueos cruzados.
+      await this.disponibilidadService.bloquearNoches(manager, orden.habitacionId, orden.checkin, orden.checkout);
       // Devuelve exactamente los cupos que se descontaron al crear (columna, no el JSON de huéspedes).
       await this.disponibilidadService.devolverCupos(manager, orden.habitacionId, orden.checkin, orden.checkout, orden.habitacionesReservadas);
       orden.status = OrdenStatus.CANCELLED;

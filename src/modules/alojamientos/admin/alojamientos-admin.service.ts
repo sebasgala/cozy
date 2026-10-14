@@ -1,16 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { Alojamiento } from './entities/alojamiento.entity';
-import { Ciudad } from './entities/ciudad.entity';
-import { Habitacion } from './entities/habitacion.entity';
-import { CreateAlojamientoDto } from './dto/create-alojamiento.dto';
-import { UpdateAlojamientoDto } from './dto/update-alojamiento.dto';
-import { FiltroAlojamientosQueryDto } from './dto/filtro-alojamientos-query.dto';
-import { AlojamientoResponseDto, PaginatedAlojamientosResponseDto } from './dto/alojamiento-response.dto';
-
-// Mayor valor que cabe en una columna integer de PostgreSQL
-const ID_MAXIMO = 2147483647;
+import { Alojamiento } from '../entities/alojamiento.entity';
+import { Ciudad } from '../entities/ciudad.entity';
+import { Habitacion } from '../entities/habitacion.entity';
+import { CreateAlojamientoDto } from '../dto/create-alojamiento.dto';
+import { UpdateAlojamientoDto } from '../dto/update-alojamiento.dto';
+import { FiltroAlojamientosQueryDto } from '../dto/filtro-alojamientos-query.dto';
+import { AlojamientoResponseDto, PaginatedAlojamientosResponseDto } from '../dto/alojamiento-response.dto';
+import { ConsultaInvalidaException } from '../problems/problem-details.exceptions';
+import { AccesoAdminService } from './acceso-admin.service';
 
 // En PATCH estos campos no pueden venir en null (las columnas son NOT NULL)
 const CAMPOS_NO_NULOS: (keyof UpdateAlojamientoDto)[] = [
@@ -24,7 +23,7 @@ const CAMPOS_NO_NULOS: (keyof UpdateAlojamientoDto)[] = [
   'activo',
 ];
 
-// Servicio del CRUD de administración (rutas /alojamientos). Es aparte del servicio del contrato.
+// Servicio del CRUD de administración (rutas /admin/alojamientos). Es aparte del servicio del contrato.
 @Injectable()
 export class AlojamientosAdminService {
   constructor(
@@ -34,6 +33,7 @@ export class AlojamientosAdminService {
     private readonly ciudadesRepository: Repository<Ciudad>,
     @InjectRepository(Habitacion)
     private readonly habitacionesRepository: Repository<Habitacion>,
+    private readonly acceso: AccesoAdminService,
   ) {}
 
   async findAll(query: FiltroAlojamientosQueryDto): Promise<PaginatedAlojamientosResponseDto> {
@@ -51,7 +51,7 @@ export class AlojamientosAdminService {
       skip: (page - 1) * limit,
       take: limit,
     });
-    const conteo = await this.contarHabitaciones(alojamientos.map((a) => a.id));
+    const conteo = await this.contarHabitaciones(alojamientos.map((a) => a.id), query.incluirInactivas);
 
     const totalPages = Math.ceil(totalItems / limit);
     const ultima = Math.max(totalPages, 1);
@@ -59,7 +59,8 @@ export class AlojamientosAdminService {
       const params = new URLSearchParams({ page: String(numero), limit: String(limit) });
       if (query.ciudadId !== undefined) params.set('ciudadId', String(query.ciudadId));
       if (query.activo !== undefined) params.set('activo', String(query.activo));
-      return `/api/v1/alojamientos?${params.toString()}`;
+      if (query.incluirInactivas !== undefined) params.set('incluirInactivas', String(query.incluirInactivas));
+      return `/api/v1/admin/alojamientos?${params.toString()}`;
     };
 
     return {
@@ -81,9 +82,9 @@ export class AlojamientosAdminService {
   }
 
   // Devuelve también los alojamientos dados de baja: el admin puede verlos.
-  async findOne(id: number): Promise<AlojamientoResponseDto> {
+  async findOne(id: number, incluirInactivas = false): Promise<AlojamientoResponseDto> {
     const alojamiento = await this.buscarEntidad(id);
-    const conteo = await this.contarHabitaciones([id]);
+    const conteo = await this.contarHabitaciones([id], incluirInactivas);
     return this.aRespuesta(alojamiento, conteo.get(id) ?? 0);
   }
 
@@ -139,10 +140,9 @@ export class AlojamientosAdminService {
   async actualizar(id: number, dto: UpdateAlojamientoDto): Promise<AlojamientoResponseDto> {
     const alojamiento = await this.buscarEntidad(id);
 
-    for (const campo of CAMPOS_NO_NULOS) {
-      if (dto[campo] === null) {
-        throw new BadRequestException(`El campo "${campo}" no puede ser null`);
-      }
+    const nulos = CAMPOS_NO_NULOS.filter((campo) => dto[campo] === null);
+    if (nulos.length > 0) {
+      throw new ConsultaInvalidaException(nulos.map((campo) => ({ name: campo, reason: 'no puede ser null' })));
     }
 
     const { ciudadId, ...resto } = dto;
@@ -170,30 +170,27 @@ export class AlojamientosAdminService {
 
   // ───────────────────────── Apoyo ─────────────────────────
 
-  private async buscarEntidad(id: number): Promise<Alojamiento> {
-    // Un id fuera del rango de integer haría fallar a PostgreSQL (500); no puede existir.
-    const alojamiento =
-      id >= 1 && id <= ID_MAXIMO
-        ? await this.alojamientosRepository.findOne({ where: { id }, relations: { ciudad: true } })
-        : null;
-    if (!alojamiento) throw new NotFoundException(`Alojamiento ${id} no existe`);
-    return alojamiento;
+  // Pasa por el punto único de acceso del admin (paso 8: comprobará el propietario).
+  private buscarEntidad(id: number): Promise<Alojamiento> {
+    return this.acceso.alojamiento(id);
   }
 
   private async obtenerCiudad(ciudadId: number): Promise<Ciudad> {
     const ciudad = await this.ciudadesRepository.findOneBy({ id: ciudadId });
-    if (!ciudad) throw new BadRequestException(`La ciudad ${ciudadId} no existe`);
+    if (!ciudad) throw new ConsultaInvalidaException([{ name: 'ciudadId', reason: `la ciudad ${ciudadId} no existe` }]);
     return ciudad;
   }
 
-  // Cuenta las filas de la tabla habitaciones de varios alojamientos con una sola consulta.
-  private async contarHabitaciones(ids: number[]): Promise<Map<number, number>> {
+  // Cuenta las habitaciones de varios alojamientos con una sola consulta: solo las activas, salvo que se pida.
+  private async contarHabitaciones(ids: number[], incluirInactivas = false): Promise<Map<number, number>> {
     if (ids.length === 0) return new Map();
-    const filas = await this.habitacionesRepository
+    const consulta = this.habitacionesRepository
       .createQueryBuilder('h')
       .select('h.alojamientoId', 'alojamientoId')
       .addSelect('COUNT(*)', 'total')
-      .where('h.alojamientoId IN (:...ids)', { ids })
+      .where('h.alojamientoId IN (:...ids)', { ids });
+    if (!incluirInactivas) consulta.andWhere('h.activo = true');
+    const filas = await consulta
       .groupBy('h.alojamientoId')
       .getRawMany<{ alojamientoId: number; total: string }>();
     return new Map(filas.map((f) => [Number(f.alojamientoId), Number(f.total)]));
@@ -218,7 +215,7 @@ export class AlojamientosAdminService {
       politicas: a.politicas,
       activo: a.activo,
       updatedAt: a.updatedAt,
-      _links: { self: `/api/v1/alojamientos/${a.id}` },
+      _links: { self: `/api/v1/admin/alojamientos/${a.id}`, habitaciones: `/api/v1/admin/alojamientos/${a.id}/habitaciones` },
     };
   }
 }

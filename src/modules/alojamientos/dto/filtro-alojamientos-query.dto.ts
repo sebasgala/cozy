@@ -27,4 +27,10 @@ export class FiltroAlojamientosQueryDto extends PaginationQueryDto {
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
   activo?: boolean;
+
+  @ApiPropertyOptional({ description: 'Contar también las habitaciones desactivadas en `habitaciones` (por defecto solo activas)', type: Boolean, example: false })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  incluirInactivas?: boolean;
 }

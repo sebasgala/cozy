@@ -9,6 +9,8 @@ import { CodigoProblema, InvalidParam } from './problem-details.exceptions';
 const CAMPO_DE_CHECK: Record<string, InvalidParam> = {
   CHK_disponibilidad_cupos: { name: 'cupos', reason: 'no puede ser negativo' },
   CHK_disponibilidad_precio: { name: 'precio', reason: 'no puede ser negativo' },
+  CHK_disponibilidad_cupos_totales: { name: 'cuposTotales', reason: 'no puede ser negativo' },
+  CHK_disponibilidad_cupos_maximo: { name: 'cuposTotales', reason: 'no puede ser menor que las habitaciones ya vendidas' },
   CHK_habitaciones_precio_base: { name: 'precioBase', reason: 'no puede ser negativo' },
   CHK_alojamientos_precio_por_noche: { name: 'precioPorNoche', reason: 'no puede ser negativo' },
   CHK_ordenes_total: { name: 'total_price', reason: 'no puede ser negativo' },

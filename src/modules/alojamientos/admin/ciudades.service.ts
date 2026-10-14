@@ -1,8 +1,9 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Ciudad } from './entities/ciudad.entity';
-import { CreateCiudadDto } from './dto/create-ciudad.dto';
+import { Ciudad } from '../entities/ciudad.entity';
+import { CreateCiudadDto } from '../dto/create-ciudad.dto';
+import { ConflictoException } from '../problems/problem-details.exceptions';
 
 @Injectable()
 export class CiudadesService {
@@ -23,7 +24,8 @@ export class CiudadesService {
       .andWhere('c.pais = :pais', { pais: dto.pais })
       .getOne();
     if (existente) {
-      throw new ConflictException(`La ciudad "${existente.nombre}" (${existente.pais}) ya existe`);
+      const reason = `La ciudad "${existente.nombre}" (${existente.pais}) ya existe`;
+      throw new ConflictoException('VALIDATION_FAILED', reason, [{ name: 'nombre', reason }]);
     }
     const nueva = this.ciudadesRepository.create(dto);
     return this.ciudadesRepository.save(nueva);

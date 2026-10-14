@@ -18,9 +18,11 @@ de ese paso y se conservan como registro; el modelo vigente está en `docs/model
 | M2 Habitaciones desde el JSON | **Resuelto** | Columna `ordenes.habitacionesReservadas`; la cancelación la usa |
 | M3 Un preview, varias órdenes | **Resuelto** | `ordenes.previewId` con índice único y FK; el create bloquea el preview. Otra clave sobre un preview usado: 409 `ROOM_NO_LONGER_AVAILABLE` |
 | M4 Sin índices en FKs | **Resuelto** | Índices en todas las FKs, `ordenes_preview.expiresAt`, `ordenes.createdAt` e `idempotency_keys.createdAt` |
-| M5 ON DELETE y borrado de habitaciones | Parcial | `habitaciones.activo` (borrado lógico) y filtro en `/search`, `/availability`, `/details` y preview; un 23503 ya no es 500. Los `ON DELETE` no cambiaron (R2, paso 7B) |
+| M5 ON DELETE y borrado de habitaciones | **Resuelto en la práctica** | `habitaciones.activo` y filtro en `/search`, `/availability`, `/details` y preview (7A). El admin de habitaciones (7B) solo hace borrado lógico: nunca borra filas, así que los `ON DELETE` no se disparan; un 23503 ya no es 500. Los `ON DELETE` siguen sin cambiar (R2) |
 | M6 Fechas de auditoría | Parcial | `createdAt` y `updatedAt` pasaron a `timestamptz`. Faltan columnas de auditoría en otras tablas (R3) |
 | M7 a M9 | Pendientes | Bloque recomendable |
+| B7 Orden de bloqueo en cancel | **Resuelto (7B)** | La cancelación bloquea las noches en orden de fecha antes de devolver cupos, igual que el create y la edición del admin |
+| (nuevo, 7B) Admin podía pisar reservas | **Resuelto (7B)** | Columna `cuposTotales`: el admin edita el total y `cupos` se mueve lo mismo; nunca baja de lo vendido (409) |
 
 ## 1. Alcance y cómo se verificó
 

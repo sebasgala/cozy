@@ -2,11 +2,13 @@ import { Check, Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typ
 import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 import { Habitacion } from './habitacion.entity';
 
-// Una fila por habitación y por día: cuántos cupos quedan y a qué precio.
+// Una fila por habitación y por día: cuántos cupos hay en total, cuántos quedan y a qué precio.
 // La clave primaria (habitacionId, fecha) también sirve de índice para la clave foránea habitacionId.
 @Entity('disponibilidad_diaria')
 @Check('CHK_disponibilidad_cupos', '"cupos" >= 0')
 @Check('CHK_disponibilidad_precio', '"precio" >= 0')
+@Check('CHK_disponibilidad_cupos_totales', '"cuposTotales" >= 0')
+@Check('CHK_disponibilidad_cupos_maximo', '"cupos" <= "cuposTotales"')
 export class DisponibilidadDiaria {
   @PrimaryColumn({ type: 'uuid' })
   habitacionId: string;
@@ -19,8 +21,13 @@ export class DisponibilidadDiaria {
   @JoinColumn({ name: 'habitacionId' })
   habitacion: Habitacion;
 
+  // Cupos que QUEDAN: las órdenes los descuentan al crearse y los devuelven al cancelarse. /availability lee este.
   @Column({ type: 'int' })
   cupos: number;
+
+  // Cupos que EXISTEN esa noche (lo que edita el admin). Siempre: cupos = cuposTotales - habitaciones vendidas.
+  @Column({ type: 'int' })
+  cuposTotales: number;
 
   @Column('numeric', {
     precision: 10,

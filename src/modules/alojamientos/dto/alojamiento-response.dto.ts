@@ -34,7 +34,7 @@ export class AlojamientoResponseDto extends BaseResponseDto {
   @ApiProperty({ description: 'Capacidad de niños', example: 1 })
   capacidadNinos: number;
 
-  @ApiProperty({ description: 'Cantidad de habitaciones registradas (se calcula contando la tabla habitaciones)', example: 3 })
+  @ApiProperty({ description: 'Cantidad de habitaciones activas (con incluirInactivas=true, todas). Se calcula contando la tabla habitaciones', example: 3 })
   habitaciones: number;
 
   @ApiProperty({ description: 'Disponibilidad de piscina', example: true })

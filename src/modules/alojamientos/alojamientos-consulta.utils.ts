@@ -97,7 +97,7 @@ export function construirProductId(habitacionId: string, checkin: string, checko
 }
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
-const esFechaValida = (fecha: string) => {
+export const esFechaValida = (fecha: string) => {
   if (!FECHA_ISO.test(fecha)) return false;
   const d = new Date(`${fecha}T00:00:00Z`);
   // Una fecha imposible (mes 13, día 45) da Invalid Date; 2026-02-30 se desplaza y ya no coincide

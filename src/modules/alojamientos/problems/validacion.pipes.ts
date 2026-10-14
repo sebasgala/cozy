@@ -1,5 +1,6 @@
-import { ValidationError, ValidationPipe } from '@nestjs/common';
+import { ParseIntPipe, ParseUUIDPipe, PipeTransform, ValidationError, ValidationPipe } from '@nestjs/common';
 import { ConsultaInvalidaException, InvalidParam } from './problem-details.exceptions';
+import { esFechaValida } from '../alojamientos-consulta.utils';
 
 // Cada controlador declara su política de validación con @UsePipes (no hay pipe global): un pipe global
 // con whitelist quitaría los campos extra antes de que el pipe estricto del admin pudiera rechazarlos.
@@ -38,10 +39,31 @@ export const validacionContrato = () =>
     exceptionFactory: (errores) => new ConsultaInvalidaException(aInvalidParams(errores)),
   });
 
-// Rutas internas de administración: estrictas, un campo que no existe en el DTO da 400 (formato de NestJS).
+// Rutas internas de administración: estrictas, un campo que no existe en el DTO da 400. Mismo formato
+// ProblemDetails que las rutas del contrato (el controlador debe declarar también ProblemDetailsFilter).
 export const validacionAdmin = () =>
   new ValidationPipe({
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,
+    exceptionFactory: (errores) => new ConsultaInvalidaException(aInvalidParams(errores)),
   });
+
+// Ids de la ruta. Si no tienen el formato, 400 ProblemDetails con el nombre del parámetro (y no un 500 de PostgreSQL).
+export const idEntero = (nombre: string) =>
+  new ParseIntPipe({
+    exceptionFactory: () => new ConsultaInvalidaException([{ name: nombre, reason: 'debe ser un número entero' }]),
+  });
+
+export const idUuid = (nombre: string) =>
+  new ParseUUIDPipe({
+    exceptionFactory: () => new ConsultaInvalidaException([{ name: nombre, reason: 'debe ser un UUID válido' }]),
+  });
+
+// Fecha de calendario YYYY-MM-DD en la ruta (rechaza 2026-02-30).
+export const fechaIso = (nombre: string): PipeTransform<string, string> => ({
+  transform(valor: string) {
+    if (!esFechaValida(valor)) throw new ConsultaInvalidaException([{ name: nombre, reason: 'debe ser una fecha válida YYYY-MM-DD' }]);
+    return valor;
+  },
+});

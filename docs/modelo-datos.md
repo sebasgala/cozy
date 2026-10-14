@@ -25,6 +25,7 @@ El esquema solo cambia con migraciones versionadas en git.
 |---|---|
 | `1791950472576-InitialSchema` | Línea base: las 7 tablas tal como las dejaba `synchronize` hasta el paso 6, y la extensión `uuid-ossp` |
 | `1791950700000-ModeloRobusto` | Paso 7A: checks, fechas obligatorias, `habitacionesReservadas`, `previewId`, índices, `timestamptz` y `habitaciones.activo` |
+| `1791950800000-CuposTotales` | Paso 7B: `disponibilidad_diaria.cuposTotales`, rellenada con lo que queda + lo vendido por órdenes vigentes |
 
 Base nueva desde cero:
 
@@ -88,7 +89,8 @@ erDiagram
     DISPONIBILIDAD_DIARIA {
         uuid habitacionId PK, FK
         date fecha PK
-        int cupos "CHECK >= 0"
+        int cupos "lo que QUEDA; CHECK >= 0 y <= cuposTotales"
+        int cuposTotales "lo que EXISTE; CHECK >= 0"
         numeric precio "CHECK >= 0"
     }
 
@@ -146,7 +148,7 @@ erDiagram
 | `ciudades` | Catálogo de ciudades. El contrato filtra por `city` (entero) y `country` (2 letras minúsculas). |
 | `alojamientos` | El hotel o lugar donde se hospeda el cliente. Su `id` es **entero**, como pide el contrato (`accommodation: integer`). Guarda los datos que devuelven `/search` y `/details` (descripción, fotos, facilidades, políticas). `activo` es su borrado lógico. |
 | `habitaciones` | Cada tipo de habitación de un alojamiento. Es el *product* del contrato: su `id` (UUID) viaja dentro del `product_id`. `activo` es su borrado lógico: una habitación inactiva no aparece en `/search`, `/availability`, `/details` ni en el preview, pero sus órdenes se pueden consultar y cancelar. |
-| `disponibilidad_diaria` | Una fila por habitación y por día, con los cupos que quedan y el precio de ese día. La clave primaria es `(habitacionId, fecha)`. De aquí salen `/availability` y el precio total de una estadía. |
+| `disponibilidad_diaria` | Una fila por habitación y por día: `cuposTotales` (habitaciones que existen esa noche, lo que edita el admin), `cupos` (las que quedan, lo que descuentan las órdenes) y el precio de ese día. La clave primaria es `(habitacionId, fecha)`. De aquí salen `/availability` y el precio total de una estadía. Siempre se cumple: `cuposTotales - cupos` = habitaciones vendidas esa noche. |
 | `ordenes_preview` | Cotización guardada antes de reservar. Su `id` es el `order_preview_id`, y `expiresAt` dice hasta cuándo se puede usar para crear la orden. |
 | `ordenes` | La reserva. Su `id` (UUID) es el `order_id`, `locator` es el código de confirmación y `status` es `PENDING`, `CONFIRMED` o `CANCELLED`. Guarda los datos del cliente, el preview del que salió (`previewId`), las habitaciones reservadas y `ownerId`, que saldrá del JWT. |
 | `idempotency_keys` | Guarda la respuesta de cada `Idempotency-Key`. Si el cliente reintenta con la misma clave, se devuelve exactamente lo mismo en lugar de crear otra reserva. |
@@ -156,6 +158,7 @@ erDiagram
 | Tabla | Restricción | Regla |
 |---|---|---|
 | `disponibilidad_diaria` | `CHK_disponibilidad_cupos`, `CHK_disponibilidad_precio` | `cupos >= 0`, `precio >= 0` |
+| `disponibilidad_diaria` | `CHK_disponibilidad_cupos_totales`, `CHK_disponibilidad_cupos_maximo` | `cuposTotales >= 0`, `cupos <= cuposTotales` |
 | `habitaciones` | `CHK_habitaciones_precio_base` | `precioBase >= 0` |
 | `alojamientos` | `CHK_alojamientos_precio_por_noche` | `precioPorNoche >= 0` |
 | `ordenes` | `CHK_ordenes_total`, `CHK_ordenes_fechas`, `CHK_ordenes_habitaciones_reservadas` | `totalPrice >= 0`, `checkout > checkin`, `habitacionesReservadas >= 1` |
@@ -204,7 +207,27 @@ Si una restricción rechaza un dato que el código no validó antes, `ErroresBas
      `habitacionesReservadas` cupos de cada noche, crea la orden (con `previewId` y `habitacionesReservadas`) y guarda la `Idempotency-Key`.
 
   Si algo falla, se deshace todo y no queda ningún cupo descontado. Dos reservas simultáneas por el último cupo: la segunda espera el bloqueo, ya no encuentra cupo y recibe `409 ROOM_NO_LONGER_AVAILABLE`.
-- `POST /orders/{orderId}/cancel` devuelve, en una transacción y con la orden bloqueada, exactamente `habitacionesReservadas` cupos a cada noche y pasa la orden a `CANCELLED`. Cancelar una orden ya cancelada no devuelve cupos otra vez.
+- `POST /orders/{orderId}/cancel` devuelve, en una transacción y con la orden bloqueada, exactamente `habitacionesReservadas` cupos a cada noche (bloqueando las noches en orden de fecha, como el create) y pasa la orden a `CANCELLED`. Cancelar una orden ya cancelada no devuelve cupos otra vez.
+- Las órdenes solo tocan `cupos`; `cuposTotales` no cambia.
+- El admin edita `cuposTotales`, nunca `cupos` (ver la sección siguiente).
+
+## Administración de habitaciones y disponibilidad (`/api/v1/admin`)
+
+Rutas internas (tag "Interno - Admin", fuera del contrato). Sin autenticación hasta el paso 8; todas pasan por
+`AccesoAdminService`, el punto único donde se verificará que el alojamiento pertenezca al administrador.
+
+- **Habitaciones:** se crean activas y sin disponibilidad. Desactivar es borrado lógico: no borra órdenes ni
+  disponibilidad, y la habitación deja de venderse. El conteo `habitaciones` de un alojamiento cuenta solo las
+  activas, salvo `incluirInactivas=true`.
+- **Disponibilidad y precios:** se edita un día o un rango (todo o nada), con `dryRun` para ver qué cambiaría.
+  1. Un candado consultivo por habitación (`pg_advisory_xact_lock`) hace que dos ediciones del admin pasen de a
+     una; cubre también los días que todavía no tienen fila.
+  2. Las noches existentes se bloquean con `SELECT ... FOR UPDATE` en orden de fecha, como el create de órdenes.
+  3. Para cada día: `cupos += nuevoTotal - totalAnterior`. Lo vendido (`cuposTotales - cupos`) no cambia nunca.
+  4. Si algún día quedaría con `cupos < 0` (total por debajo de lo vendido), se rechaza toda la operación con 409
+     y `invalidParams` lista cada fecha.
+  5. Los días sin fila se crean (hacen falta `cuposTotales` y `precio`), con `cupos = cuposTotales`.
+- Cambiar un precio no afecta a las órdenes ya creadas; un preview anterior al cambio da `409 PRICE_CHANGED` al crear.
 
 ## Datos de prueba (seed)
 

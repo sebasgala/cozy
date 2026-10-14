@@ -170,12 +170,16 @@ async function seed() {
   // 4. Disponibilidad diaria. ON CONFLICT DO NOTHING: no pisa los días ya existentes.
   const dias = proximosDias(DIAS_DISPONIBILIDAD);
   const filas = todasLasHabitaciones.flatMap((habitacion, indiceHab) =>
-    dias.map((dia, indiceDia) => ({
-      habitacionId: habitacion.id,
-      fecha: dia.fecha,
-      cupos: 2 + ((indiceDia + indiceHab * 3) % 6), // entre 2 y 7
-      precio: Math.round(habitacion.precioBase * (dia.finDeSemana ? 1.15 : 1) * 100) / 100,
-    })),
+    dias.map((dia, indiceDia) => {
+      const cupos = 2 + ((indiceDia + indiceHab * 3) % 6); // entre 2 y 7
+      return {
+        habitacionId: habitacion.id,
+        fecha: dia.fecha,
+        cupos,
+        cuposTotales: cupos, // sin reservas todavía: quedan todos
+        precio: Math.round(habitacion.precioBase * (dia.finDeSemana ? 1.15 : 1) * 100) / 100,
+      };
+    }),
   );
   await dataSource
     .createQueryBuilder()

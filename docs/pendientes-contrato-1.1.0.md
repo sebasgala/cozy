@@ -34,3 +34,12 @@ debe revisarse cuando llegue la versión 1.1.0.
    Conviene preguntar si 1.1.0 agrega un valor para este caso.
 7. **`DELETE /webhooks/{id}`:** las respuestas oficiales solo hablan de POST; se dejó en 204, como dice el
    contrato 1.0.0.
+8. **Preview reutilizado:** un segundo `POST /orders/create` con **otra** `Idempotency-Key` sobre un
+   `order_preview_id` que ya dio una orden responde 409 con `code: ROOM_NO_LONGER_AVAILABLE`, el valor más
+   cercano del enum actual. Sugerencia para 1.1.0: un código propio, `PREVIEW_ALREADY_USED`, para que el cliente
+   distinga "pide un preview nuevo" de "ya no hay cupo". Al llegar, cambiarlo en `OrdenesService.previewYaUsado`
+   y en `problems/errores-base-datos.filter.ts` (caso `UQ_ordenes_previewId`).
+9. **`url` de `/search` y `/availability`:** devuelven `/api/v1/alojamientos/{id}`. Desde el paso 7B el CRUD
+   interno vive en `/api/v1/admin/alojamientos`, así que ese `url` ya no apunta a ninguna ruta. Se dejó igual
+   para no cambiar las respuestas del contrato. Hay que definir con los autores a qué debe apuntar (por ejemplo,
+   una ficha pública del alojamiento) y cambiarlo en `urlAlojamiento` de `alojamientos-consulta.utils.ts`.

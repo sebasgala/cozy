@@ -1,0 +1,98 @@
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Res, UseFilters, UsePipes } from '@nestjs/common';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
+import {
+  ActualizarHabitacionDto,
+  CrearHabitacionDto,
+  FiltroHabitacionesQueryDto,
+  HabitacionAdminResponseDto,
+} from '../dto/admin/habitacion-admin.dto';
+import { ProblemDetailsFilter } from '../problems/problem-details.filter';
+import { respuestaProblema } from '../problems/respuestas-swagger';
+import { idEntero, idUuid, validacionAdmin } from '../problems/validacion.pipes';
+import { HabitacionesAdminService } from './habitaciones-admin.service';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Administración de habitaciones (/api/v1/admin/...). NO es parte del contrato.
+//
+// PENDIENTE (paso 8): proteger con un guard de autenticación y rol. La verificación de que el
+// alojamiento pertenezca al administrador ya pasa por AccesoAdminService.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@ApiTags('Interno - Admin')
+@UsePipes(validacionAdmin())
+@UseFilters(ProblemDetailsFilter)
+@Controller('admin')
+export class HabitacionesAdminController {
+  constructor(private readonly habitacionesAdminService: HabitacionesAdminService) {}
+
+  @Get('alojamientos/:alojamientoId/habitaciones')
+  @ApiOperation({ summary: 'Listar las habitaciones de un alojamiento', description: 'Por defecto solo las activas; incluirInactivas=true trae todas.' })
+  @ApiParam({ name: 'alojamientoId', type: 'integer', example: 1 })
+  @ApiResponse({ status: 200, description: 'Habitaciones del alojamiento', type: [HabitacionAdminResponseDto] })
+  @ApiResponse(respuestaProblema(400, 'Parámetros inválidos'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: el alojamiento no existe'))
+  listar(@Param('alojamientoId', idEntero('alojamientoId')) alojamientoId: number, @Query() filtro: FiltroHabitacionesQueryDto) {
+    return this.habitacionesAdminService.listar(alojamientoId, filtro);
+  }
+
+  @Post('alojamientos/:alojamientoId/habitaciones')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Crear una habitación', description: 'Nace activa y sin disponibilidad: los cupos y precios por fecha se cargan aparte.' })
+  @ApiParam({ name: 'alojamientoId', type: 'integer', example: 1 })
+  @ApiResponse({ status: 201, description: 'Habitación creada. Devuelve la cabecera Location.', type: HabitacionAdminResponseDto })
+  @ApiResponse(respuestaProblema(400, 'Datos inválidos o campos no permitidos'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: el alojamiento no existe'))
+  async crear(
+    @Param('alojamientoId', idEntero('alojamientoId')) alojamientoId: number,
+    @Body() dto: CrearHabitacionDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const nueva = await this.habitacionesAdminService.crear(alojamientoId, dto);
+    res.setHeader('Location', nueva._links.self);
+    return nueva;
+  }
+
+  @Get('habitaciones/:id')
+  @ApiOperation({ summary: 'Ver una habitación (también si está desactivada)' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Detalle de la habitación', type: HabitacionAdminResponseDto })
+  @ApiResponse(respuestaProblema(400, 'El id no es un UUID'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
+  obtener(@Param('id', idUuid('id')) id: string) {
+    return this.habitacionesAdminService.obtener(id);
+  }
+
+  @Patch('habitaciones/:id')
+  @ApiOperation({ summary: 'Actualizar parcialmente una habitación', description: 'nombre, tipo, capacidades, precioBase, mealPlan y cancellationType.' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Habitación actualizada', type: HabitacionAdminResponseDto })
+  @ApiResponse(respuestaProblema(400, 'Datos inválidos, null en un campo obligatorio o campos no permitidos'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
+  actualizar(@Param('id', idUuid('id')) id: string, @Body() dto: ActualizarHabitacionDto) {
+    return this.habitacionesAdminService.actualizar(id, dto);
+  }
+
+  @Post('habitaciones/:id/desactivar')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Desactivar una habitación (borrado lógico)',
+    description: 'Deja de venderse en /search, /availability, /details y preview. No borra órdenes ni disponibilidad. Repetirlo no da error.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Habitación desactivada', type: HabitacionAdminResponseDto })
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
+  desactivar(@Param('id', idUuid('id')) id: string) {
+    return this.habitacionesAdminService.cambiarEstado(id, false);
+  }
+
+  @Post('habitaciones/:id/reactivar')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reactivar una habitación', description: 'Vuelve a venderse. Repetirlo no da error.' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Habitación activa', type: HabitacionAdminResponseDto })
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
+  reactivar(@Param('id', idUuid('id')) id: string) {
+    return this.habitacionesAdminService.cambiarEstado(id, true);
+  }
+}
