@@ -1,25 +1,29 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDefined, IsEmail, IsNotEmpty, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsDefined, IsEmail, IsNotEmpty, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 
-// `customer_details` del contrato. Sus campos son obligatorios aquí (en el contrato no lo son)
-// porque una reserva sin nombre ni correo del cliente no sirve.
+// `customer_details` del contrato. Reglas confirmadas por los autores del contrato: first_name y last_name
+// obligatorios y no vacíos, email obligatorio con formato válido. Cualquier otro campo (p. ej. teléfono) es
+// opcional y, como no lo usamos, se ignora.
 export class CustomerDetailsDto {
-  @ApiProperty({ example: 'Ana', maxLength: 120 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(120)
+  @ApiProperty({ description: 'Nombre (obligatorio, no vacío)', example: 'Ana', maxLength: 120 })
+  @MaxLength(120, { message: 'no puede superar 120 caracteres' })
+  @Matches(/\S/, { message: 'no puede estar vacío' })
+  @IsString({ message: 'debe ser texto' })
+  @IsNotEmpty({ message: 'es obligatorio y no puede estar vacío' })
   first_name: string;
 
-  @ApiProperty({ example: 'Pérez', maxLength: 120 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(120)
+  @ApiProperty({ description: 'Apellido (obligatorio, no vacío)', example: 'Pérez', maxLength: 120 })
+  @MaxLength(120, { message: 'no puede superar 120 caracteres' })
+  @Matches(/\S/, { message: 'no puede estar vacío' })
+  @IsString({ message: 'debe ser texto' })
+  @IsNotEmpty({ message: 'es obligatorio y no puede estar vacío' })
   last_name: string;
 
-  @ApiProperty({ example: 'ana.perez@example.com', maxLength: 255 })
-  @IsEmail()
-  @MaxLength(255)
+  @ApiProperty({ description: 'Correo del cliente (obligatorio, formato válido)', format: 'email', example: 'ana.perez@example.com', maxLength: 255 })
+  @MaxLength(255, { message: 'no puede superar 255 caracteres' })
+  @IsEmail({}, { message: 'formato inválido' })
+  @IsNotEmpty({ message: 'es obligatorio' })
   email: string;
 }
 

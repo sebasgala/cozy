@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDefined, IsInt, IsNotEmpty, IsString, Min, ValidateNested } from 'class-validator';
+import { IsDefined, IsInt, IsNotEmpty, IsString, Matches, MaxLength, Min, ValidateNested } from 'class-validator';
 import { AccommodationsGuestsDto } from './accommodations-guests.dto';
 
 // Esquema `OrderPreviewRequest` del contrato: accommodation_id, product_id y guests.
@@ -14,11 +14,16 @@ export class OrderPreviewRequestDto {
   @ApiProperty({
     description:
       'Identifica una oferta concreta (habitación + fechas) con el formato `<uuid-de-la-habitación>:<checkin>:<checkout>`, ' +
-      'fechas YYYY-MM-DD. Debe obtenerse tal cual del `product_id` que devuelve /availability.',
+      'fechas YYYY-MM-DD (unos 58 caracteres, sin espacios, máximo 200). Debe obtenerse tal cual del `product_id` que devuelve /availability.',
     example: '704fe49f-9024-4f7e-b023-df55a3aab5c1:2026-10-09:2026-10-12',
+    maxLength: 200,
+    pattern: '^\\S+$',
   })
   @IsString()
   @IsNotEmpty()
+  // Restricciones confirmadas por los autores del contrato: sin espacios y como máximo ~200 caracteres.
+  @MaxLength(200, { message: 'product_id no puede superar 200 caracteres' })
+  @Matches(/^\S+$/, { message: 'product_id no puede tener espacios' })
   product_id: string;
 
   @ApiProperty({ type: () => AccommodationsGuestsDto })

@@ -6,8 +6,10 @@ export interface InvalidParam {
   reason: string;
 }
 
-// Valores del enum `code` de ProblemDetails en el contrato.
+// Valores del enum `code` de ProblemDetails en el contrato. NOT_FOUND aún no está en el contrato 1.0.0:
+// los autores lo confirmaron para la versión 1.1.0 (ver docs/pendientes-contrato-1.1.0.md).
 export type CodigoProblema =
+  | 'NOT_FOUND'
   | 'VALIDATION_FAILED'
   | 'ROOM_NO_LONGER_AVAILABLE'
   | 'PRICE_CHANGED'
@@ -27,8 +29,10 @@ export class ConsultaInvalidaException extends BadRequestException {
   }
 }
 
-// 404 para un recurso que no existe (o un alojamiento inactivo).
+// 404 para un recurso que no existe (o un alojamiento inactivo), con code NOT_FOUND.
 export class RecursoNoEncontradoException extends NotFoundException {
+  public readonly code: CodigoProblema = 'NOT_FOUND';
+
   constructor(
     detail: string,
     public readonly invalidParams: InvalidParam[] = [],

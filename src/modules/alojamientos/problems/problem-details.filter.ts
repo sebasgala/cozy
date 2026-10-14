@@ -29,9 +29,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       title: TITULOS[status] ?? 'Error',
       status,
       detail,
-      // El enum `code` del contrato no tiene valores para "no encontrado" ni para la clave reutilizada:
-      // en esos casos se usa VALIDATION_FAILED, el más cercano.
-      code: (exception as { code?: string }).code ?? 'VALIDATION_FAILED',
+      // 404 => NOT_FOUND (confirmado por los autores para el contrato 1.1.0). La clave de idempotencia
+      // reutilizada (422) no tiene código propio en el contrato: se usa VALIDATION_FAILED, el más cercano.
+      code: (exception as { code?: string }).code ?? (status === 404 ? 'NOT_FOUND' : 'VALIDATION_FAILED'),
       ...(invalidParams.length > 0 && { invalidParams }),
     };
 

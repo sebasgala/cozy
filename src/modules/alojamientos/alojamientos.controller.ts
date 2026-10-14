@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Delete, Body, Param, Headers, Res,
-  ParseUUIDPipe, UseGuards, UseFilters, HttpCode, HttpStatus, Header,
+  ParseUUIDPipe, UseGuards, UseFilters, UsePipes, HttpCode, HttpStatus, Header,
 } from '@nestjs/common';
 import { Response } from 'express';
 import {
@@ -20,6 +20,7 @@ import { OrderPreviewRequestDto, OrderPreviewResponseDto } from './dto/order-pre
 import { OrderCreateRequestDto } from './dto/order-create.dto';
 import { OrderDetailDto } from './dto/order-detail.dto';
 import { validarIdempotencyKey } from './alojamientos-consulta.utils';
+import { validacionContrato } from './problems/validacion.pipes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Controlador BFF de Alojamientos — Alineado 1:1 con alojamientos-openapi.yaml
@@ -70,6 +71,8 @@ const CABECERAS_CATALOGO = {
 const BOOKER_EJEMPLO = { country: 'ec', platform: 'desktop' };
 
 @ApiExtraModels(ProblemDetailsDto)
+// Campos extra del cuerpo: se ignoran. Obligatorios ausentes o tipos incorrectos: 400 ProblemDetails.
+@UsePipes(validacionContrato())
 @Controller()
 export class AlojamientosController {
   constructor(
@@ -160,12 +163,13 @@ export class AlojamientosController {
   })
   @ApiResponse({ status: 200, description: 'Disponibilidad y detalles del precio', type: AvailabilityResponseDto })
   @ApiResponse(respuestaProblema(400, 'Petición inválida'))
-  @ApiResponse(respuestaProblema(404, 'El alojamiento no existe o está inactivo (no está definido en el contrato)'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: el alojamiento no existe o está inactivo'))
   availability(@Body() availabilityRequest: AvailabilityRequestDto) {
     return this.alojamientosService.checkAvailability(availabilityRequest);
   }
 
   @Post('bulk-availability')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Disponibilidad y Precios')
   @ApiOperation({
     summary: 'Consultar disponibilidad múltiple de alojamientos',
@@ -197,7 +201,7 @@ export class AlojamientosController {
   })
   @ApiResponse({ status: 200, description: 'Detalles de los alojamientos solicitados', type: AccommodationDetailsResponseDto, headers: CABECERAS_200 })
   @ApiResponse(respuestaProblema(400, 'Petición inválida'))
-  @ApiResponse(respuestaProblema(404, 'Algún alojamiento pedido no existe o está inactivo (no está definido en el contrato)'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: algún alojamiento pedido no existe o está inactivo'))
   async getDetails(@Body() detailsRequest: AccommodationDetailsRequestDto, @Res({ passthrough: true }) res: Response) {
     const resultado = await this.alojamientosService.getDetails(detailsRequest);
     res.set(CABECERAS_CATALOGO);
@@ -205,6 +209,7 @@ export class AlojamientosController {
   }
 
   @Post('details/changes')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Búsqueda y Catálogo')
   @ApiSecurity('OAuth2Security', ['alojamientos:read'])
   @ApiOperation({
@@ -218,6 +223,7 @@ export class AlojamientosController {
   }
 
   @Post('chains')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Búsqueda y Catálogo')
   @ApiOperation({
     summary: 'Listar cadenas hoteleras y sus marcas',
@@ -231,6 +237,7 @@ export class AlojamientosController {
   }
 
   @Post('constants')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Componentes Comunes')
   @ApiOperation({
     summary: 'Consultar constantes del sistema (facilidades, tipos de cuartos, etc.)',
@@ -244,6 +251,7 @@ export class AlojamientosController {
   }
 
   @Post('reviews')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Búsqueda y Catálogo')
   @ApiOperation({
     summary: 'Obtener reseñas de alojamientos',
@@ -257,6 +265,7 @@ export class AlojamientosController {
   }
 
   @Post('reviews/scores')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Búsqueda y Catálogo')
   @ApiOperation({
     summary: 'Obtener puntuaciones de reseñas',
@@ -300,7 +309,7 @@ export class AlojamientosController {
   })
   @ApiResponse({ status: 200, description: 'Detalles de la orden previsualizada y precios finales', type: OrderPreviewResponseDto })
   @ApiResponse(respuestaProblema(400, 'Petición inválida (incluye huéspedes que no caben en la habitación)'))
-  @ApiResponse(respuestaProblema(404, 'El alojamiento o la habitación no existen (no está definido en el contrato)'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: el alojamiento o la habitación no existen'))
   @ApiResponse(respuestaProblema(409, 'ROOM_NO_LONGER_AVAILABLE: sin cupos suficientes (no está definido en el contrato)'))
   previewOrder(@Body() previewRequest: OrderPreviewRequestDto) {
     return this.ordenesService.preview(previewRequest);
@@ -332,7 +341,7 @@ export class AlojamientosController {
     },
   })
   @ApiResponse({ status: 201, description: 'Orden creada exitosamente', type: OrderDetailDto })
-  @ApiResponse(respuestaProblema(400, 'Petición inválida, Idempotency-Key ausente o mal formada, vista previa inexistente o expirada'))
+  @ApiResponse(respuestaProblema(400, 'VALIDATION_FAILED: campo obligatorio ausente o con tipo incorrecto (customer_details exige first_name y last_name no vacíos y email con formato válido), Idempotency-Key ausente o mal formada, vista previa inexistente o expirada'))
   @ApiResponse(respuestaProblema(409, 'ROOM_NO_LONGER_AVAILABLE (otra reserva tomó los cupos) o PRICE_CHANGED'))
   @ApiResponse(respuestaProblema(422, 'La Idempotency-Key ya se usó con un cuerpo distinto (no está definido en el contrato)'))
   async createOrder(
@@ -355,12 +364,13 @@ export class AlojamientosController {
   @ApiParam({ name: 'orderId', type: 'string', format: 'uuid', example: '9a1f3c52-7d2e-4b8a-9f61-3c5d7e9b1a24' })
   @ApiResponse({ status: 200, description: 'Detalles completos de la orden', type: OrderDetailDto })
   @ApiResponse(respuestaProblema(400, 'orderId no es un UUID'))
-  @ApiResponse(respuestaProblema(404, 'La orden no existe'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la orden no existe'))
   getOrder(@Param('orderId', uuidDeOrden()) orderId: string) {
     return this.ordenesService.obtener(orderId);
   }
 
   @Post('orders/:orderId/modify')
+  @HttpCode(HttpStatus.OK)
   @ApiTags('Gestión de Órdenes (Reservas)')
   @ApiSecurity('OAuth2Security', ['alojamientos:book'])
   @ApiOperation({
@@ -397,7 +407,7 @@ export class AlojamientosController {
   @ApiHeader(CABECERA_IDEMPOTENCIA)
   @ApiResponse({ status: 200, description: 'Cancelación procesada: devuelve la orden', type: OrderDetailDto })
   @ApiResponse(respuestaProblema(400, 'orderId no es un UUID o falta la Idempotency-Key'))
-  @ApiResponse(respuestaProblema(404, 'La orden no existe (no está definido en el contrato)'))
+  @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la orden no existe'))
   @ApiResponse(respuestaProblema(409, 'Conflicto (definido en el contrato; hoy no se produce)'))
   cancelOrder(
     @Headers('Idempotency-Key') idempotencyKey: string,

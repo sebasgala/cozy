@@ -1,12 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UsePipes } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CiudadesService } from './ciudades.service';
 import { CreateCiudadDto } from './dto/create-ciudad.dto';
 import { CiudadResponseDto } from './dto/ciudad-response.dto';
+import { validacionAdmin } from './problems/validacion.pipes';
 
 // Ciudades mínimas para poder elegir ciudadId al crear alojamientos.
 // PENDIENTE: autenticación y roles (ver AlojamientosAdminController).
 @ApiTags('Interno - Admin')
+@UsePipes(validacionAdmin())
 @Controller('ciudades')
 export class CiudadesController {
   constructor(private readonly ciudadesService: CiudadesService) {}

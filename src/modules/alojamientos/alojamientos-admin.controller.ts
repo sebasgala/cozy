@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Put, Query, Res,
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Put, Query, Res, UsePipes,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
@@ -8,6 +8,7 @@ import { CreateAlojamientoDto } from './dto/create-alojamiento.dto';
 import { UpdateAlojamientoDto } from './dto/update-alojamiento.dto';
 import { FiltroAlojamientosQueryDto } from './dto/filtro-alojamientos-query.dto';
 import { AlojamientoResponseDto, PaginatedAlojamientosResponseDto } from './dto/alojamiento-response.dto';
+import { validacionAdmin } from './problems/validacion.pipes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CRUD de administración de alojamientos (/api/v1/alojamientos).
@@ -20,6 +21,7 @@ import { AlojamientoResponseDto, PaginatedAlojamientosResponseDto } from './dto/
 // ─────────────────────────────────────────────────────────────────────────────
 
 @ApiTags('Interno - Admin')
+@UsePipes(validacionAdmin())
 @Controller('alojamientos')
 export class AlojamientosAdminController {
   constructor(private readonly alojamientosAdminService: AlojamientosAdminService) {}

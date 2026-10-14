@@ -1,6 +1,5 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
@@ -8,13 +7,8 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
+  // Sin ValidationPipe global: cada controlador declara el suyo con @UsePipes
+  // (rutas del contrato ignoran campos extra; rutas de admin los rechazan). Ver problems/validacion.pipes.ts.
 
   // Etiquetas en orden: primero las del contrato alojamientos-openapi.yaml y al final las internas.
   const config = new DocumentBuilder()
@@ -28,6 +22,10 @@ async function bootstrap() {
         'El resto de rutas del contrato (bulk-availability, details/changes, chains, constants, reviews, modify, webhooks) ' +
         'devuelve datos de relleno. La autenticación OAuth2 está pendiente: ninguna ruta pide token todavía.\n\n' +
         'Errores: application/problem+json (ProblemDetails) en las rutas del contrato implementadas. ' +
+        'En las rutas del contrato los campos extra del cuerpo se ignoran; un campo obligatorio ausente o con tipo ' +
+        'incorrecto da 400. Un recurso inexistente da 404 con code NOT_FOUND (valor que llega en la versión 1.1.0 ' +
+        'del contrato). 201 solo en POST /orders/create y POST /webhooks; el resto de POST responde 200. ' +
+        'Las rutas de "Interno - Admin" rechazan los campos extra.\n\n' +
         'El prefijo /api/v1 es nuestro; en el contrato las rutas no lo llevan.',
     )
     .setVersion('1.0.0')
