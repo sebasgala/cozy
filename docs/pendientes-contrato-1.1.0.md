@@ -43,3 +43,14 @@ debe revisarse cuando llegue la versión 1.1.0.
    interno vive en `/api/v1/admin/alojamientos`, así que ese `url` ya no apunta a ninguna ruta. Se dejó igual
    para no cambiar las respuestas del contrato. Hay que definir con los autores a qué debe apuntar (por ejemplo,
    una ficha pública del alojamiento) y cambiarlo en `urlAlojamiento` de `alojamientos-consulta.utils.ts`.
+10. **Códigos de error internos (paso 8):** `UNAUTHORIZED` (401), `FORBIDDEN` (403), `ACCOUNT_PENDING` (403) y
+    `ACCOUNT_SUSPENDED` (403) solo los usan las rutas internas `/auth`, `/cuenta` y `/admin`. No están en el enum del
+    contrato; si el contrato incorpora autenticación, llevarlos a los autores. `RATE_LIMIT_EXCEEDED` (429) sí está.
+11. **Autenticación de las rutas del contrato:** el contrato pide OAuth2 con scopes (`alojamientos:read`, `:book`,
+    `:cancel`, `:webhooks`), pero sus rutas siguen sin exigir login hasta confirmarlo con el profesor. Nuestro JWT es
+    interno y propio, no un token OAuth2 del emisor del contrato.
+12. **`POST /orders/{id}/cancel` y `GET /orders/{id}` sin login:** cualquiera que conozca el `order_id` (UUID) puede
+    verla o cancelarla. Se dejó así por la regla de no cambiar las rutas del contrato. Sugerir a los autores exigir
+    la cuenta o el par localizador + correo.
+13. **Compra sin cuenta:** la consulta con localizador + correo es una ruta nuestra, `POST /cuenta/consultar-reserva`.
+    Preguntar si el contrato quiere algo equivalente.

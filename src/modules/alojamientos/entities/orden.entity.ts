@@ -13,6 +13,7 @@ import { ColumnNumericTransformer } from '../../../common/transformers/column-nu
 import { Alojamiento } from './alojamiento.entity';
 import { Habitacion } from './habitacion.entity';
 import { OrdenPreview } from './orden-preview.entity';
+import { Usuario } from './usuario.entity';
 
 // Mismos valores que el enum status de OrderDetail en el contrato.
 export enum OrdenStatus {
@@ -103,10 +104,14 @@ export class Orden {
   @Column({ type: 'varchar', length: 255 })
   paymentReference: string;
 
-  // Sub del token JWT del dueño de la reserva. Queda null mientras no exista autenticación.
-  @Index()
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  ownerId: string | null;
+  // Cliente con cuenta que hizo la compra. Null = compra sin cuenta (o anterior a las cuentas).
+  @Index('IX_ordenes_clienteId')
+  @Column({ type: 'uuid', nullable: true })
+  clienteId: string | null;
+
+  @ManyToOne(() => Usuario, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'clienteId' })
+  cliente: Usuario | null;
 
   @Index('IX_ordenes_createdAt')
   @CreateDateColumn({ type: 'timestamptz' })

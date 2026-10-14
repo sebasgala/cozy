@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 import { Ciudad } from './ciudad.entity';
+import { Usuario } from './usuario.entity';
 
 @Entity('alojamientos')
 @Check('CHK_alojamientos_precio_por_noche', '"precioPorNoche" >= 0')
@@ -57,6 +58,15 @@ export class Alojamiento {
   @ManyToOne(() => Ciudad, { nullable: true })
   @JoinColumn({ name: 'ciudadId' })
   ciudad: Ciudad | null;
+
+  // Administrador dueño del alojamiento. Null = sin dueño (solo lo ve el superadmin).
+  @Index('IX_alojamientos_propietarioId')
+  @Column({ type: 'uuid', nullable: true })
+  propietarioId: string | null;
+
+  @ManyToOne(() => Usuario, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'propietarioId' })
+  propietario: Usuario | null;
 
   @Column({ type: 'jsonb', nullable: true })
   fotos: string[] | null;

@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, ForbiddenException, HttpException, NotFoundException, UnauthorizedException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 // Elemento de `invalidParams` del esquema ProblemDetails del contrato.
 export interface InvalidParam {
@@ -10,6 +13,10 @@ export interface InvalidParam {
 // los autores lo confirmaron para la versión 1.1.0 (ver docs/pendientes-contrato-1.1.0.md).
 export type CodigoProblema =
   | 'NOT_FOUND'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'ACCOUNT_PENDING'
+  | 'ACCOUNT_SUSPENDED'
   | 'VALIDATION_FAILED'
   | 'ROOM_NO_LONGER_AVAILABLE'
   | 'PRICE_CHANGED'
@@ -49,6 +56,37 @@ export class ConflictoException extends ConflictException {
     public readonly invalidParams: InvalidParam[] = [],
   ) {
     super(detail);
+  }
+}
+
+// 401: sin token, token inválido o vencido, o credenciales incorrectas. Código interno (no está en el contrato).
+export class NoAutenticadoException extends UnauthorizedException {
+  public readonly code: CodigoProblema = 'UNAUTHORIZED';
+
+  constructor(detail = 'Hace falta iniciar sesión con un token válido') {
+    super(detail);
+  }
+}
+
+// 403: rol insuficiente, cuenta pendiente de aprobación o cuenta suspendida. Códigos internos.
+export class ProhibidoException extends ForbiddenException {
+  constructor(
+    detail: string,
+    public readonly code: CodigoProblema = 'FORBIDDEN',
+  ) {
+    super(detail);
+  }
+}
+
+// 429: demasiados intentos. RATE_LIMIT_EXCEEDED sí está en el contrato.
+export class DemasiadosIntentosException extends HttpException {
+  public readonly code: CodigoProblema = 'RATE_LIMIT_EXCEEDED';
+
+  constructor(
+    detail: string,
+    public readonly retryAfterSegundos: number,
+  ) {
+    super(detail, 429);
   }
 }
 

@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { DisponibilidadDiaria } from '../entities/disponibilidad-diaria.entity';
+import { Usuario } from '../entities/usuario.entity';
 import { DisponibilidadService } from '../disponibilidad.service';
+import { AuditoriaService } from '../seguridad/auditoria.service';
 import {
   CambioDisponibilidadDto,
   DiaDisponibilidadDto,
@@ -55,10 +57,11 @@ export class DisponibilidadAdminService {
     private readonly dataSource: DataSource,
     private readonly disponibilidadService: DisponibilidadService,
     private readonly acceso: AccesoAdminService,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
-  async listar(habitacionId: string, desde: string, hasta: string): Promise<DisponibilidadAdminResponseDto> {
-    const habitacion = await this.acceso.habitacion(habitacionId);
+  async listar(habitacionId: string, desde: string, hasta: string, usuario: Usuario): Promise<DisponibilidadAdminResponseDto> {
+    const habitacion = await this.acceso.habitacion(habitacionId, usuario);
     validarRango(desde, hasta);
     const filas = await this.dataSource
       .getRepository(DisponibilidadDiaria)
@@ -71,8 +74,8 @@ export class DisponibilidadAdminService {
   }
 
   // Edita un rango (o un solo día, con desde = hasta) en UNA transacción: todo o nada.
-  async editar(habitacionId: string, dto: EditarRangoDto): Promise<EdicionDisponibilidadResponseDto> {
-    const habitacion = await this.acceso.habitacion(habitacionId);
+  async editar(habitacionId: string, dto: EditarRangoDto, usuario: Usuario): Promise<EdicionDisponibilidadResponseDto> {
+    const habitacion = await this.acceso.habitacion(habitacionId, usuario);
     validarRango(dto.desde, dto.hasta);
     if (dto.cuposTotales === undefined && dto.precio === undefined) {
       throw new ConsultaInvalidaException([
@@ -87,7 +90,7 @@ export class DisponibilidadAdminService {
       throw new ConsultaInvalidaException([{ name: 'diasSemana', reason: 'ningún día del rango cae en esos días de la semana' }]);
     }
 
-    return this.dataSource.transaction((manager) => this.editarEnTransaccion(manager, habitacion.id, fechas, dto));
+    return this.dataSource.transaction((manager) => this.editarEnTransaccion(manager, habitacion.id, fechas, dto, usuario));
   }
 
   private async editarEnTransaccion(
@@ -95,6 +98,7 @@ export class DisponibilidadAdminService {
     habitacionId: string,
     fechas: string[],
     dto: EditarRangoDto,
+    usuario: Usuario,
   ): Promise<EdicionDisponibilidadResponseDto> {
     // 1. Dos ediciones del admin sobre la misma habitación pasan de a una. Cubre también los días que todavía
     //    no tienen fila (no se pueden bloquear con FOR UPDATE porque no existen).
@@ -184,6 +188,19 @@ export class DisponibilidadAdminService {
           })),
         );
       }
+    }
+
+    // 5. Auditoría en la misma transacción (la vista previa no cambia nada, así que no deja fila).
+    const modificados = cambios.filter((c) => c.accion !== 'sin_cambios');
+    if (!dto.dryRun && modificados.length > 0) {
+      await this.auditoria.registrar(manager, {
+        usuarioId: usuario.id,
+        accion: 'editar_disponibilidad',
+        entidad: 'disponibilidad',
+        entidadId: habitacionId,
+        antes: Object.fromEntries(modificados.map((c) => [c.fecha, c.antes])),
+        despues: Object.fromEntries(modificados.map((c) => [c.fecha, c.despues])),
+      });
     }
 
     return {

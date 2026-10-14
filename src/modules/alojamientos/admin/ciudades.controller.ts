@@ -1,15 +1,22 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseFilters, UsePipes } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseFilters, UseGuards, UsePipes } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CiudadesService } from './ciudades.service';
 import { CreateCiudadDto } from '../dto/create-ciudad.dto';
 import { CiudadResponseDto } from '../dto/ciudad-response.dto';
+import { RolUsuario, Usuario } from '../entities/usuario.entity';
+import { JwtAuthGuard } from '../seguridad/jwt-auth.guard';
+import { Roles, UsuarioActual } from '../seguridad/roles.decorator';
+import { RolesGuard } from '../seguridad/roles.guard';
 import { ProblemDetailsFilter } from '../problems/problem-details.filter';
 import { respuestaProblema } from '../problems/respuestas-swagger';
 import { validacionAdmin } from '../problems/validacion.pipes';
 
 // Ciudades mínimas para poder elegir ciudadId al crear alojamientos.
-// PENDIENTE: autenticación y roles (ver AlojamientosAdminController).
+// Exige login y rol administrador o superadmin. Las ciudades son un catálogo común: no tienen propietario.
 @ApiTags('Interno - Admin')
+@ApiBearerAuth('JWT')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(RolUsuario.ADMINISTRADOR, RolUsuario.SUPERADMIN)
 @UsePipes(validacionAdmin())
 @UseFilters(ProblemDetailsFilter)
 @Controller('admin/ciudades')
@@ -29,7 +36,7 @@ export class CiudadesController {
   @ApiResponse({ status: 201, description: 'Ciudad creada.', type: CiudadResponseDto })
   @ApiResponse(respuestaProblema(400, 'Datos inválidos o campos no permitidos'))
   @ApiResponse(respuestaProblema(409, 'Ya existe una ciudad con ese nombre y país'))
-  crear(@Body() dto: CreateCiudadDto) {
-    return this.ciudadesService.crear(dto);
+  crear(@Body() dto: CreateCiudadDto, @UsuarioActual() usuario: Usuario) {
+    return this.ciudadesService.crear(dto, usuario);
   }
 }

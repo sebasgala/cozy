@@ -1,8 +1,8 @@
 import {
-  Controller, Get, Post, Delete, Body, Param, Headers, Res,
+  Controller, Get, Post, Delete, Body, Param, Headers, Req, Res,
   ParseUUIDPipe, UseGuards, UseFilters, UsePipes, HttpCode, HttpStatus, Header,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import {
   ApiTags, ApiOperation, ApiResponse, ApiParam,
   ApiHeader, ApiSecurity, ApiBody, ApiExtraModels, getSchemaPath,
@@ -21,6 +21,7 @@ import { OrderCreateRequestDto } from './dto/order-create.dto';
 import { OrderDetailDto } from './dto/order-detail.dto';
 import { validarIdempotencyKey } from './alojamientos-consulta.utils';
 import { validacionContrato } from './problems/validacion.pipes';
+import { AuthService } from './seguridad/auth.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Controlador BFF de Alojamientos — Alineado 1:1 con alojamientos-openapi.yaml
@@ -30,7 +31,7 @@ import { validacionContrato } from './problems/validacion.pipes';
 // /orders/create, GET /orders/{orderId} y /orders/{orderId}/cancel. El resto sigue con datos de relleno.
 //
 // PENDIENTE (autenticación): el contrato protege las rutas de órdenes con OAuth2 (scopes
-// alojamientos:read, :book y :cancel). Todavía no hay JWT: no se bloquea nada y ownerId queda null.
+// alojamientos:read, :book y :cancel). Estas rutas siguen sin exigir login; si llega un token válido, la orden queda con clienteId.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // orderId con formato UUID; si no lo es, 400 en formato ProblemDetails (y no un 500 de PostgreSQL).
@@ -78,6 +79,7 @@ export class AlojamientosController {
   constructor(
     private readonly alojamientosService: AlojamientosService,
     private readonly ordenesService: OrdenesService,
+    private readonly authService: AuthService,
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -346,10 +348,13 @@ export class AlojamientosController {
   @ApiResponse(respuestaProblema(422, 'La Idempotency-Key ya se usó con un cuerpo distinto (no está definido en el contrato)'))
   async createOrder(
     @Headers('Idempotency-Key') idempotencyKey: string,
+    @Req() peticion: Request,
     @Body() createRequest: OrderCreateRequestDto,
   ) {
     const clave = validarIdempotencyKey(idempotencyKey);
-    const respuesta = await this.ordenesService.crear(clave, createRequest);
+    // Sin login obligatorio (contrato): con un token válido la orden queda asociada a la cuenta (clienteId).
+    const cliente = await this.authService.usuarioOpcional(peticion.headers.authorization);
+    const respuesta = await this.ordenesService.crear(clave, createRequest, cliente?.id ?? null);
     return respuesta.body; // siempre 201: solo se guardan (y repiten) creaciones exitosas
   }
 

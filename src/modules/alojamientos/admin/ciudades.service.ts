@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { Usuario } from '../entities/usuario.entity';
+import { AuditoriaService } from '../seguridad/auditoria.service';
 import { Ciudad } from '../entities/ciudad.entity';
 import { CreateCiudadDto } from '../dto/create-ciudad.dto';
 import { ConflictoException } from '../problems/problem-details.exceptions';
@@ -10,13 +12,16 @@ export class CiudadesService {
   constructor(
     @InjectRepository(Ciudad)
     private readonly ciudadesRepository: Repository<Ciudad>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
   findAll(): Promise<Ciudad[]> {
     return this.ciudadesRepository.find({ order: { nombre: 'ASC', pais: 'ASC' } });
   }
 
-  async crear(dto: CreateCiudadDto): Promise<Ciudad> {
+  async crear(dto: CreateCiudadDto, usuario: Usuario): Promise<Ciudad> {
     // La restricción única de la BD distingue mayúsculas; aquí se evita también "quito" vs "Quito".
     const existente = await this.ciudadesRepository
       .createQueryBuilder('c')
@@ -27,7 +32,16 @@ export class CiudadesService {
       const reason = `La ciudad "${existente.nombre}" (${existente.pais}) ya existe`;
       throw new ConflictoException('VALIDATION_FAILED', reason, [{ name: 'nombre', reason }]);
     }
-    const nueva = this.ciudadesRepository.create(dto);
-    return this.ciudadesRepository.save(nueva);
+    return this.dataSource.transaction(async (manager) => {
+      const guardada = await manager.save(manager.create(Ciudad, dto));
+      await this.auditoria.registrar(manager, {
+        usuarioId: usuario.id,
+        accion: 'crear',
+        entidad: 'ciudad',
+        entidadId: guardada.id,
+        despues: { nombre: guardada.nombre, pais: guardada.pais },
+      });
+      return guardada;
+    });
   }
 }

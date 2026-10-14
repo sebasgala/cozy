@@ -1,3 +1,4 @@
+import * as bcrypt from 'bcryptjs';
 import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../../app.module';
@@ -5,6 +6,8 @@ import { Alojamiento } from '../entities/alojamiento.entity';
 import { Ciudad } from '../entities/ciudad.entity';
 import { DisponibilidadDiaria } from '../entities/disponibilidad-diaria.entity';
 import { Habitacion } from '../entities/habitacion.entity';
+import { EstadoUsuario, RolUsuario, Usuario } from '../entities/usuario.entity';
+import { COSTE_BCRYPT } from '../seguridad/auth.service';
 
 // Seed de datos de prueba. Se puede ejecutar varias veces sin duplicar datos:
 //   npm run seed
@@ -116,13 +119,45 @@ function proximosDias(cantidad: number): { fecha: string; finDeSemana: boolean }
   });
 }
 
+// El superadmin inicial sale de variables de entorno: nunca hay credenciales fijas en el código.
+function credencialesSuperadmin(): { email: string; password: string } {
+  const email = process.env.SUPERADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.SUPERADMIN_PASSWORD;
+  const faltan = [!email && 'SUPERADMIN_EMAIL', !password && 'SUPERADMIN_PASSWORD'].filter(Boolean);
+  if (faltan.length > 0) {
+    throw new Error(`Faltan variables de entorno para crear el superadmin: ${faltan.join(', ')}. Defínelas en .env (ver .env.example) y vuelve a correr el seed.`);
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('SUPERADMIN_EMAIL no tiene formato de correo');
+  if (password.length < 8 || password.length > 72) throw new Error('SUPERADMIN_PASSWORD debe tener entre 8 y 72 caracteres');
+  return { email, password };
+}
+
 async function seed() {
+  const credenciales = credencialesSuperadmin(); // falla antes de tocar la base si faltan
   const app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn'] });
   const dataSource = app.get(DataSource);
 
   const ciudadesRepo = dataSource.getRepository(Ciudad);
   const alojamientosRepo = dataSource.getRepository(Alojamiento);
   const habitacionesRepo = dataSource.getRepository(Habitacion);
+
+  // 0. Superadmin inicial (si ya existe no se toca: la contraseña no se pisa al repetir el seed)
+  const usuariosRepo = dataSource.getRepository(Usuario);
+  let superadmin = await usuariosRepo.findOneBy({ email: credenciales.email });
+  if (!superadmin) {
+    superadmin = await usuariosRepo.save(
+      usuariosRepo.create({
+        email: credenciales.email,
+        passwordHash: await bcrypt.hash(credenciales.password, COSTE_BCRYPT),
+        nombre: 'Super',
+        apellido: 'Admin',
+        rol: RolUsuario.SUPERADMIN,
+        estado: EstadoUsuario.ACTIVO,
+      }),
+    );
+  } else if (superadmin.rol !== RolUsuario.SUPERADMIN) {
+    throw new Error(`${credenciales.email} ya existe con rol ${superadmin.rol}: usa otro SUPERADMIN_EMAIL`);
+  }
 
   // 1. Ciudades
   const ciudades = new Map<string, Ciudad>();
@@ -154,8 +189,13 @@ async function seed() {
           facilidades: a.facilidades,
           politicas: { checkin: '15:00', checkout: '12:00', mascotas: false },
           activo: true,
+          propietarioId: superadmin.id,
         }),
       );
+    } else if (!alojamiento.propietarioId) {
+      // Alojamiento de prueba que ya existía antes de las cuentas: pasa a ser del superadmin.
+      alojamiento.propietarioId = superadmin.id;
+      await alojamientosRepo.save(alojamiento);
     }
 
     for (const h of a.habitaciones) {

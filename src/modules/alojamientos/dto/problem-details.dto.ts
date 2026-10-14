@@ -23,10 +23,14 @@ export class ProblemDetailsDto {
   detail?: string;
 
   @ApiProperty({
-    description: 'NOT_FOUND (404) todavía no está en el contrato 1.0.0: llega en la versión 1.1.0',
+    description: 'NOT_FOUND (404) llega en la versión 1.1.0 del contrato. UNAUTHORIZED, FORBIDDEN, ACCOUNT_PENDING y ACCOUNT_SUSPENDED son códigos internos de las rutas de seguridad y administración',
     example: 'VALIDATION_FAILED',
     enum: [
       'NOT_FOUND',
+      'UNAUTHORIZED',
+      'FORBIDDEN',
+      'ACCOUNT_PENDING',
+      'ACCOUNT_SUSPENDED',
       'VALIDATION_FAILED',
       'ROOM_NO_LONGER_AVAILABLE',
       'PRICE_CHANGED',

@@ -25,6 +25,7 @@ El esquema solo cambia con migraciones versionadas en git.
 |---|---|
 | `1791950472576-InitialSchema` | Línea base: las 7 tablas tal como las dejaba `synchronize` hasta el paso 6, y la extensión `uuid-ossp` |
 | `1791950700000-ModeloRobusto` | Paso 7A: checks, fechas obligatorias, `habitacionesReservadas`, `previewId`, índices, `timestamptz` y `habitaciones.activo` |
+| `1791950900000-UsuariosYAuditoria` | Paso 8: tablas `usuarios` y `auditoria_cambios`, `alojamientos.propietarioId` y `ordenes.clienteId` (reemplaza a `ownerId`) |
 | `1791950800000-CuposTotales` | Paso 7B: `disponibilidad_diaria.cuposTotales`, rellenada con lo que queda + lo vendido por órdenes vigentes |
 
 Base nueva desde cero:
@@ -40,6 +41,9 @@ npm run seed
 ```mermaid
 erDiagram
     CIUDADES ||--o{ ALOJAMIENTOS : "tiene"
+    USUARIOS ||--o{ ALOJAMIENTOS : "es propietario"
+    USUARIOS ||--o{ ORDENES : "compra con cuenta"
+    USUARIOS ||--o{ AUDITORIA_CAMBIOS : "hace"
     ALOJAMIENTOS ||--o{ HABITACIONES : "ofrece"
     HABITACIONES ||--o{ DISPONIBILIDAD_DIARIA : "tiene por dia"
     ALOJAMIENTOS ||--o{ ORDENES_PREVIEW : "se cotiza en"
@@ -66,6 +70,7 @@ erDiagram
         text descripcion "nullable"
         varchar moneda "default USD"
         int ciudadId FK "nullable, indexado"
+        uuid propietarioId FK "nullable, indexado; administrador dueno"
         jsonb fotos "nullable"
         jsonb facilidades "nullable"
         jsonb politicas "nullable"
@@ -124,9 +129,32 @@ erDiagram
         numeric totalPrice "CHECK >= 0"
         varchar currency
         varchar paymentReference
-        varchar ownerId "nullable, indexado"
+        uuid clienteId FK "nullable, indexado; null = compra sin cuenta"
         timestamptz createdAt "indexado"
         timestamptz updatedAt
+    }
+
+    USUARIOS {
+        uuid id PK
+        varchar email UK "en minusculas"
+        varchar passwordHash "bcrypt coste 12; nunca se devuelve"
+        varchar nombre
+        varchar apellido
+        enum rol "cliente, administrador, superadmin"
+        enum estado "pendiente, activo, suspendido"
+        timestamptz createdAt
+        timestamptz updatedAt
+    }
+
+    AUDITORIA_CAMBIOS {
+        bigint id PK
+        uuid usuarioId FK "nullable, indexado"
+        varchar accion
+        varchar entidad
+        varchar entidadId
+        jsonb antes "nullable"
+        jsonb despues "nullable"
+        timestamptz createdAt "indexado"
     }
 
     IDEMPOTENCY_KEYS {
@@ -141,7 +169,7 @@ erDiagram
 
 `IDEMPOTENCY_KEYS` no tiene relaciones: es una tabla de apoyo independiente.
 
-## Las 7 tablas
+## Las 9 tablas
 
 | Tabla | Para qué sirve |
 |---|---|
@@ -151,6 +179,8 @@ erDiagram
 | `disponibilidad_diaria` | Una fila por habitación y por día: `cuposTotales` (habitaciones que existen esa noche, lo que edita el admin), `cupos` (las que quedan, lo que descuentan las órdenes) y el precio de ese día. La clave primaria es `(habitacionId, fecha)`. De aquí salen `/availability` y el precio total de una estadía. Siempre se cumple: `cuposTotales - cupos` = habitaciones vendidas esa noche. |
 | `ordenes_preview` | Cotización guardada antes de reservar. Su `id` es el `order_preview_id`, y `expiresAt` dice hasta cuándo se puede usar para crear la orden. |
 | `ordenes` | La reserva. Su `id` (UUID) es el `order_id`, `locator` es el código de confirmación y `status` es `PENDING`, `CONFIRMED` o `CANCELLED`. Guarda los datos del cliente, el preview del que salió (`previewId`), las habitaciones reservadas y `ownerId`, que saldrá del JWT. |
+| `usuarios` | Cuentas de acceso. `rol`: cliente, administrador o superadmin. `estado`: un cliente nace `activo`; un administrador nace `pendiente` y no puede iniciar sesión (403 `ACCOUNT_PENDING`) hasta que el superadmin lo aprueba; `suspendido` también queda sin acceso (403 `ACCOUNT_SUSPENDED`). El correo se guarda en minúsculas y es único. Contraseña: hash bcrypt (coste 12), nunca en una respuesta. |
+| `auditoria_cambios` | Una fila por cada cambio de datos que hace un usuario de administración (habitaciones, disponibilidad, alojamientos, ciudades, usuarios y cancelaciones de reservas): quién, qué acción, sobre qué, y el valor antes y después. Se escribe en la misma transacción que el cambio. |
 | `idempotency_keys` | Guarda la respuesta de cada `Idempotency-Key`. Si el cliente reintenta con la misma clave, se devuelve exactamente lo mismo en lugar de crear otra reserva. |
 
 ## Restricciones
@@ -213,8 +243,8 @@ Si una restricción rechaza un dato que el código no validó antes, `ErroresBas
 
 ## Administración de habitaciones y disponibilidad (`/api/v1/admin`)
 
-Rutas internas (tag "Interno - Admin", fuera del contrato). Sin autenticación hasta el paso 8; todas pasan por
-`AccesoAdminService`, el punto único donde se verificará que el alojamiento pertenezca al administrador.
+Rutas internas (tag "Interno - Admin", fuera del contrato). Exigen login con rol administrador o superadmin; todas pasan por
+`AccesoAdminService`, el punto único donde se verifica que el alojamiento pertenezca al administrador. Cada cambio escribe su fila en `auditoria_cambios`.
 
 - **Habitaciones:** se crean activas y sin disponibilidad. Desactivar es borrado lógico: no borra órdenes ni
   disponibilidad, y la habitación deja de venderse. El conteo `habitaciones` de un alojamiento cuenta solo las
@@ -229,10 +259,19 @@ Rutas internas (tag "Interno - Admin", fuera del contrato). Sin autenticación h
   5. Los días sin fila se crean (hacen falta `cuposTotales` y `precio`), con `cupos = cuposTotales`.
 - Cambiar un precio no afecta a las órdenes ya creadas; un preview anterior al cambio da `409 PRICE_CHANGED` al crear.
 
+## Usuarios, roles y propietario (paso 8)
+
+- **Cuenta opcional para comprar:** las rutas del contrato siguen sin exigir login. Si `POST /orders/create` llega con un token válido, la orden queda con `clienteId`; sin token (o con uno que no sirve) es una compra sin cuenta (`clienteId` nulo). Las órdenes anteriores a las cuentas también tienen `clienteId` nulo.
+- **Propietario:** cada alojamiento tiene un `propietarioId` (un administrador). Quien crea un alojamiento queda como su propietario. Un alojamiento sin propietario solo lo ve el superadmin.
+- **Alcance** (`AccesoAdminService`): el superadmin ve y modifica todo; un administrador solo los alojamientos propios y, a través de ellos, sus habitaciones, disponibilidad y reservas. Lo que está fuera de su alcance responde 404 `NOT_FOUND`, igual que si no existiera.
+- **Token:** JWT de 1 hora con solo el id del usuario. El rol y el estado se leen de la base en cada petición, así una suspensión o un cambio de rol se nota de inmediato.
+- **Límite de intentos:** el login admite 5 intentos por minuto por correo e IP (429 con `Retry-After`); consultar una reserva por localizador, 10 por minuto por IP.
+- **Reseñas (paso 11, aún no implementado):** solo podrá reseñar un alojamiento quien tenga una orden `CONFIRMED` de ese alojamiento.
+
 ## Datos de prueba (seed)
 
 ```bash
 npm run seed
 ```
 
-Carga 3 ciudades, 5 alojamientos, 12 habitaciones y 60 días de disponibilidad por habitación (720 filas), desde la fecha del día. Se puede ejecutar varias veces: no duplica datos y solo agrega los días nuevos que falten. Necesita la base corriendo (`docker-compose up -d`) y las migraciones aplicadas (`npm run migration:run`).
+Antes crea el superadmin con las variables `SUPERADMIN_EMAIL` y `SUPERADMIN_PASSWORD` (de `.env`; si faltan, el seed falla con un mensaje claro y no toca la base) y lo deja como propietario de los alojamientos de prueba. Carga 3 ciudades, 5 alojamientos, 12 habitaciones y 60 días de disponibilidad por habitación (720 filas), desde la fecha del día. Se puede ejecutar varias veces: no duplica datos y solo agrega los días nuevos que falten. Necesita la base corriendo (`docker-compose up -d`) y las migraciones aplicadas (`npm run migration:run`).

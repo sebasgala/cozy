@@ -11,6 +11,7 @@ import { OrderPreviewRequestDto, OrderPreviewResponseDto } from './dto/order-pre
 import { OrderCreateRequestDto } from './dto/order-create.dto';
 import { OrderDetailDto } from './dto/order-detail.dto';
 import { DisponibilidadService } from './disponibilidad.service';
+import { AuditoriaService } from './seguridad/auditoria.service';
 import {
   ClaveIdempotenciaReutilizadaException,
   ConflictoException,
@@ -44,6 +45,7 @@ export class OrdenesService {
     @InjectRepository(IdempotencyKey)
     private readonly clavesRepository: Repository<IdempotencyKey>,
     private readonly disponibilidadService: DisponibilidadService,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
   // ───────────────────────── POST /orders/preview ─────────────────────────
@@ -108,14 +110,15 @@ export class OrdenesService {
   // Idempotencia: misma clave + mismo cuerpo => la respuesta guardada (sin crear otra orden);
   // misma clave + cuerpo distinto => 422. Solo se guardan las creaciones exitosas.
   // Un preview da una sola orden: otra clave sobre un preview ya usado => 409.
-  async crear(idempotencyKey: string, request: OrderCreateRequestDto): Promise<RespuestaCreacion> {
+  // clienteId: el usuario del token si la petición lo trae; null = compra sin cuenta.
+  async crear(idempotencyKey: string, request: OrderCreateRequestDto, clienteId: string | null = null): Promise<RespuestaCreacion> {
     const huella = huellaDePeticion(request);
     const guardada = await this.clavesRepository.findOneBy({ key: idempotencyKey });
     if (guardada) return this.repetirRespuesta(guardada, huella);
 
     for (let intento = 1; ; intento++) {
       try {
-        return await this.dataSource.transaction((manager) => this.crearEnTransaccion(manager, idempotencyKey, huella, request));
+        return await this.dataSource.transaction((manager) => this.crearEnTransaccion(manager, idempotencyKey, huella, request, clienteId));
       } catch (error) {
         const violacion = this.violacionUnica(error);
         // Otra petición con la misma clave terminó primero: se responde lo que ella guardó.
@@ -138,6 +141,7 @@ export class OrdenesService {
     idempotencyKey: string,
     huella: string,
     request: OrderCreateRequestDto,
+    clienteId: string | null,
   ): Promise<RespuestaCreacion> {
     // 1. Bloqueo del preview: dos creaciones sobre el mismo preview pasan de a una.
     const preview = esUuid(request.order_preview_id)
@@ -223,7 +227,7 @@ export class OrdenesService {
         totalPrice: total,
         currency: preview.currency,
         paymentReference: request.payment_reference,
-        ownerId: null, // PENDIENTE: saldrá del `sub` del JWT cuando exista autenticación
+        clienteId, // null = compra sin cuenta
       }),
     );
 
@@ -264,7 +268,8 @@ export class OrdenesService {
   // Pasa la orden a CANCELLED y devuelve los cupos, en una transacción. La fila de la orden se bloquea
   // para que dos cancelaciones simultáneas no devuelvan los cupos dos veces. Si ya estaba cancelada,
   // responde la orden tal cual. No se aplica política de cancelación: el contrato no la define.
-  async cancelar(orderId: string): Promise<OrderDetailDto> {
+  // `auditor`: si la cancelación la hace un administrador, se escribe la fila de auditoría en la misma transacción.
+  async cancelar(orderId: string, auditor?: { usuarioId: string }): Promise<OrderDetailDto> {
     await this.dataSource.transaction(async (manager) => {
       const orden = await manager
         .getRepository(Orden)
@@ -281,8 +286,76 @@ export class OrdenesService {
       await this.disponibilidadService.devolverCupos(manager, orden.habitacionId, orden.checkin, orden.checkout, orden.habitacionesReservadas);
       orden.status = OrdenStatus.CANCELLED;
       await manager.save(orden);
+      if (auditor) {
+        await this.auditoria.registrar(manager, {
+          usuarioId: auditor.usuarioId,
+          accion: 'cancelar',
+          entidad: 'orden',
+          entidadId: orden.id,
+          antes: { status: OrdenStatus.CONFIRMED, habitacionesReservadas: orden.habitacionesReservadas },
+          despues: { status: OrdenStatus.CANCELLED },
+        });
+      }
     });
     return this.obtener(orderId);
+  }
+
+  // ───────────────────────── Consultas de cuenta y de administración ─────────────────────────
+
+  // Reservas de un cliente con cuenta, más recientes primero.
+  async listarDeCliente(clienteId: string, estado: OrdenStatus | undefined, pagina: number, limite: number) {
+    return this.listar({ clienteId, estado }, pagina, limite);
+  }
+
+  // Reservas de los alojamientos de un administrador (propietarioId = null => todas, para el superadmin).
+  async listarDeAlojamientos(propietarioId: string | null, filtro: { estado?: OrdenStatus; alojamientoId?: number }, pagina: number, limite: number) {
+    return this.listar({ propietarioId, ...filtro }, pagina, limite);
+  }
+
+  private async listar(
+    filtro: { clienteId?: string; propietarioId?: string | null; estado?: OrdenStatus; alojamientoId?: number },
+    pagina: number,
+    limite: number,
+  ) {
+    const consulta = this.ordenesRepository
+      .createQueryBuilder('o')
+      .innerJoinAndSelect('o.alojamiento', 'a')
+      .innerJoinAndSelect('o.habitacion', 'h')
+      .orderBy('o.createdAt', 'DESC')
+      .addOrderBy('o.id', 'ASC')
+      .skip((pagina - 1) * limite)
+      .take(limite);
+    if (filtro.clienteId) consulta.andWhere('o.clienteId = :clienteId', { clienteId: filtro.clienteId });
+    if (filtro.propietarioId) consulta.andWhere('a.propietarioId = :propietarioId', { propietarioId: filtro.propietarioId });
+    if (filtro.estado) consulta.andWhere('o.status = :estado', { estado: filtro.estado });
+    if (filtro.alojamientoId !== undefined) consulta.andWhere('o.alojamientoId = :alojamientoId', { alojamientoId: filtro.alojamientoId });
+    const [ordenes, total] = await consulta.getManyAndCount();
+    return {
+      data: ordenes.map((o) => {
+        const detalle = this.aDetalle(o, o.alojamiento.nombre, o.habitacion.nombre, o.habitacion.cancellationType);
+        // El administrador necesita saber quién reservó; el cliente en su cuenta ya lo sabe.
+        return 'propietarioId' in filtro
+          ? { ...detalle, customer_details: { first_name: o.customerFirstName, last_name: o.customerLastName, email: o.customerEmail }, cliente_id: o.clienteId }
+          : detalle;
+      }),
+      meta: { totalItems: total, itemCount: ordenes.length, itemsPerPage: limite, totalPages: Math.ceil(total / limite), currentPage: pagina },
+    };
+  }
+
+  // Compra sin cuenta: localizador + correo. Si no coinciden => 404, igual que si el localizador no existiera.
+  async consultarPorLocalizador(localizador: string, correo: string): Promise<OrderDetailDto> {
+    const orden = await this.ordenesRepository
+      .createQueryBuilder('o')
+      .innerJoinAndSelect('o.alojamiento', 'a')
+      .innerJoinAndSelect('o.habitacion', 'h')
+      .where('o.locator = :localizador', { localizador: localizador.trim().toUpperCase() })
+      .andWhere('LOWER(o.customerEmail) = LOWER(:correo)', { correo: correo.trim() })
+      .getOne();
+    if (!orden) {
+      const reason = 'No hay una reserva con ese localizador y correo';
+      throw new RecursoNoEncontradoException(reason, [{ name: 'localizador', reason }]);
+    }
+    return this.aDetalle(orden, orden.alojamiento.nombre, orden.habitacion.nombre, orden.habitacion.cancellationType);
   }
 
   // ───────────────────────── Apoyo ─────────────────────────

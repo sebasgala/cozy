@@ -20,7 +20,7 @@ async function bootstrap() {
         'La sección "Interno - Admin" es el CRUD de administración y NO forma parte del contrato.\n\n' +
         'Estado: /search, /availability, /details y el flujo de órdenes (preview, create, get, cancel) usan datos reales. ' +
         'El resto de rutas del contrato (bulk-availability, details/changes, chains, constants, reviews, modify, webhooks) ' +
-        'devuelve datos de relleno. La autenticación OAuth2 está pendiente: ninguna ruta pide token todavía.\n\n' +
+        'devuelve datos de relleno. Las rutas del contrato siguen sin pedir token (la exigencia de OAuth2 está por confirmar); las internas de administración sí piden el JWT de /auth/login.\n\n' +
         'Errores: application/problem+json (ProblemDetails) en las rutas del contrato implementadas. ' +
         'En las rutas del contrato los campos extra del cuerpo se ignoran; un campo obligatorio ausente o con tipo ' +
         'incorrecto da 400. Un recurso inexistente da 404 con code NOT_FOUND (valor que llega en la versión 1.1.0 ' +
@@ -35,7 +35,10 @@ async function bootstrap() {
     .addTag('Gestión de Órdenes (Reservas)', 'Contrato: preview, create, get, modify y cancel de órdenes')
     .addTag('Componentes Comunes', 'Contrato: constantes del sistema')
     .addTag('Webhooks', 'Contrato: suscripciones a eventos')
-    .addTag('Interno - Admin', 'NO es parte del contrato: CRUD de administración de alojamientos y ciudades')
+    .addTag('Interno - Admin', 'NO es parte del contrato: administración de alojamientos, habitaciones, disponibilidad, reservas y usuarios. Exige login (administrador o superadmin)')
+    .addTag('Interno - Autenticación', 'NO es parte del contrato: registro, login y sesión actual')
+    .addTag('Interno - Cuenta', 'NO es parte del contrato: perfil y reservas del cliente, y consulta de una reserva sin cuenta')
+    .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Token de /auth/login' }, 'JWT')
     .addOAuth2(
       {
         type: 'oauth2',

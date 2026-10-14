@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Query, UseFilters, UsePipes } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Patch, Query, UseFilters, UseGuards, UsePipes } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   DisponibilidadAdminResponseDto,
   EdicionDisponibilidadResponseDto,
@@ -7,6 +7,10 @@ import {
   EditarRangoDto,
   RangoFechasQueryDto,
 } from '../dto/admin/disponibilidad-admin.dto';
+import { RolUsuario, Usuario } from '../entities/usuario.entity';
+import { JwtAuthGuard } from '../seguridad/jwt-auth.guard';
+import { Roles, UsuarioActual } from '../seguridad/roles.decorator';
+import { RolesGuard } from '../seguridad/roles.guard';
 import { ProblemDetailsFilter } from '../problems/problem-details.filter';
 import { respuestaProblema } from '../problems/respuestas-swagger';
 import { fechaIso, idUuid, validacionAdmin } from '../problems/validacion.pipes';
@@ -14,7 +18,7 @@ import { DisponibilidadAdminService } from './disponibilidad-admin.service';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Administración de disponibilidad y precios por fecha (/api/v1/admin/habitaciones/{id}/disponibilidad).
-// NO es parte del contrato. PENDIENTE (paso 8): guard de autenticación y rol.
+// NO es parte del contrato. Exige login y rol administrador o superadmin; el alcance lo decide AccesoAdminService.
 //
 // El admin edita cuposTotales (habitaciones que existen); los cupos que quedan se ajustan solos para no
 // pisar las reservas. Ver DisponibilidadAdminService.
@@ -23,6 +27,9 @@ import { DisponibilidadAdminService } from './disponibilidad-admin.service';
 const RESPUESTA_409 = respuestaProblema(409, 'cuposTotales quedaría por debajo de lo ya vendido; invalidParams lista cada fecha. No se guarda nada');
 
 @ApiTags('Interno - Admin')
+@ApiBearerAuth('JWT')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(RolUsuario.ADMINISTRADOR, RolUsuario.SUPERADMIN)
 @UsePipes(validacionAdmin())
 @UseFilters(ProblemDetailsFilter)
 @Controller('admin/habitaciones/:id/disponibilidad')
@@ -35,8 +42,8 @@ export class DisponibilidadAdminController {
   @ApiResponse({ status: 200, description: 'Días con fila en el rango', type: DisponibilidadAdminResponseDto })
   @ApiResponse(respuestaProblema(400, 'Fechas inválidas, hasta anterior a desde o más de 366 días'))
   @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
-  listar(@Param('id', idUuid('id')) id: string, @Query() rango: RangoFechasQueryDto) {
-    return this.disponibilidadAdminService.listar(id, rango.desde, rango.hasta);
+  listar(@Param('id', idUuid('id')) id: string, @Query() rango: RangoFechasQueryDto, @UsuarioActual() usuario: Usuario) {
+    return this.disponibilidadAdminService.listar(id, rango.desde, rango.hasta, usuario);
   }
 
   @Patch()
@@ -52,8 +59,8 @@ export class DisponibilidadAdminController {
   @ApiResponse(respuestaProblema(400, 'Datos inválidos, rango mayor a 366 días o días nuevos sin cuposTotales y precio'))
   @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
   @ApiResponse(RESPUESTA_409)
-  editarRango(@Param('id', idUuid('id')) id: string, @Body() dto: EditarRangoDto) {
-    return this.disponibilidadAdminService.editar(id, dto);
+  editarRango(@Param('id', idUuid('id')) id: string, @Body() dto: EditarRangoDto, @UsuarioActual() usuario: Usuario) {
+    return this.disponibilidadAdminService.editar(id, dto, usuario);
   }
 
   @Patch(':fecha')
@@ -67,7 +74,12 @@ export class DisponibilidadAdminController {
   @ApiResponse(respuestaProblema(400, 'Datos o fecha inválidos'))
   @ApiResponse(respuestaProblema(404, 'NOT_FOUND: la habitación no existe'))
   @ApiResponse(RESPUESTA_409)
-  editarDia(@Param('id', idUuid('id')) id: string, @Param('fecha', fechaIso('fecha')) fecha: string, @Body() dto: EditarDiaDto) {
-    return this.disponibilidadAdminService.editar(id, { ...dto, desde: fecha, hasta: fecha });
+  editarDia(
+    @Param('id', idUuid('id')) id: string,
+    @Param('fecha', fechaIso('fecha')) fecha: string,
+    @Body() dto: EditarDiaDto,
+    @UsuarioActual() usuario: Usuario,
+  ) {
+    return this.disponibilidadAdminService.editar(id, { ...dto, desde: fecha, hasta: fecha }, usuario);
   }
 }

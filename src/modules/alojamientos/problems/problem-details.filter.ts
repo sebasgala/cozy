@@ -1,23 +1,34 @@
 import {
-  ArgumentsHost, BadRequestException, Catch, ConflictException, ExceptionFilter, HttpException, NotFoundException,
-  UnprocessableEntityException,
+  ArgumentsHost, BadRequestException, Catch, ConflictException, ExceptionFilter, ForbiddenException, HttpException, NotFoundException,
+  UnauthorizedException, UnprocessableEntityException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { InvalidParam } from './problem-details.exceptions';
+import { DemasiadosIntentosException, InvalidParam } from './problem-details.exceptions';
 
 const DETALLE_VALIDACION = 'La petición contiene parámetros inválidos';
 
 const TITULOS: Record<number, string> = {
   400: 'Petición inválida',
+  401: 'No autenticado',
+  403: 'Prohibido',
   404: 'No encontrado',
   409: 'Conflicto',
   422: 'Petición no procesable',
+  429: 'Demasiadas peticiones',
 };
 
-// Convierte los errores 400, 404, 409 y 422 de una ruta al formato ProblemDetails del contrato
+// Convierte los errores 400, 401, 403, 404, 409, 422 y 429 de una ruta al formato ProblemDetails del contrato
 // (application/problem+json). Se aplica con @UseFilters solo en las rutas del contrato,
 // así el CRUD de administración conserva el formato de error por defecto de NestJS.
-@Catch(BadRequestException, NotFoundException, ConflictException, UnprocessableEntityException)
+@Catch(
+  BadRequestException,
+  UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
+  ConflictException,
+  UnprocessableEntityException,
+  DemasiadosIntentosException,
+)
 export class ProblemDetailsFilter implements ExceptionFilter {
   catch(exception: HttpException, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
@@ -35,6 +46,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       ...(invalidParams.length > 0 && { invalidParams }),
     };
 
+    if (exception instanceof DemasiadosIntentosException) response.setHeader('Retry-After', String(exception.retryAfterSegundos));
     response.status(status).type('application/problem+json').json(problema);
   }
 
