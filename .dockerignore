@@ -1,8 +1,24 @@
+# Fuera de la imagen: se instala y se compila dentro de ella
 node_modules
-npm-debug.log
 dist
+npm-debug.log*
+*.tsbuildinfo
+
+# Secretos y configuración local (las variables se pasan al contenedor, nunca dentro de la imagen)
 .env
+.env.*
+!.env.example
+
+# Control de versiones y herramientas de desarrollo
 .git
 .gitignore
+.vscode
+.idea
+
+# No hacen falta para correr
+docs
+contracts
+README.md
+Dockerfile
 .dockerignore
-*.md
+docker-compose.yml

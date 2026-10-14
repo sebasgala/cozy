@@ -1,11 +1,23 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { opcionesCors, valorTrustProxy } from './config/red';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.setGlobalPrefix('api/v1');
+
+  // Detrás de Render el proxy pone la IP real del cliente en X-Forwarded-For; TRUST_PROXY (p. ej. 1) hace que
+  // req.ip la use, y con ella el límite de intentos de login. Por defecto no se confía en ningún proxy.
+  app.set('trust proxy', valorTrustProxy());
+
+  // CORS según CORS_ORIGIN (ver config/red.ts).
+  app.enableCors(opcionesCors());
+
+  // Que Docker/Render puedan detener la app con SIGTERM cerrando antes las conexiones.
+  app.enableShutdownHooks();
 
   // Sin ValidationPipe global: cada controlador declara el suyo con @UsePipes
   // (rutas del contrato ignoran campos extra; rutas de admin los rechazan). Ver problems/validacion.pipes.ts.
@@ -37,6 +49,7 @@ async function bootstrap() {
     .addTag('Webhooks', 'Contrato: suscripciones a eventos')
     .addTag('Interno - Admin', 'NO es parte del contrato: administración de alojamientos, habitaciones, disponibilidad, reservas y usuarios. Exige login (administrador o superadmin)')
     .addTag('Interno - Autenticación', 'NO es parte del contrato: registro, login y sesión actual')
+    .addTag('Interno - Salud', 'NO es parte del contrato: comprobación de que la API y la base de datos responden')
     .addTag('Interno - Cuenta', 'NO es parte del contrato: perfil y reservas del cliente, y consulta de una reserva sin cuenta')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT', description: 'Token de /auth/login' }, 'JWT')
     .addOAuth2(
