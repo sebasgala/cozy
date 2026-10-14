@@ -13,7 +13,11 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "seed": "nest build && node dist/modules/alojamientos/seed/seed.js"
+    "seed": "nest build && node dist/modules/alojamientos/seed/seed.js",
+    "migration:generate": "nest build && typeorm -d dist/database/data-source.js migration:generate",
+    "migration:run": "nest build && typeorm -d dist/database/data-source.js migration:run",
+    "migration:revert": "nest build && typeorm -d dist/database/data-source.js migration:revert",
+    "migration:show": "nest build && typeorm -d dist/database/data-source.js migration:show"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

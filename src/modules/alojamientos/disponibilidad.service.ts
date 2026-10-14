@@ -59,7 +59,7 @@ export class DisponibilidadService {
     return alojamiento;
   }
 
-  // Habitaciones libres TODAS las noches de [checkin, checkout), con cupos >= habitaciones pedidas
+  // Habitaciones activas libres TODAS las noches de [checkin, checkout), con cupos >= habitaciones pedidas
   // y donde caben los huéspedes. El total es la suma del precio de cada noche. Una sola consulta.
   async habitacionesDisponibles(criterio: CriterioDisponibilidad, manager?: EntityManager): Promise<HabitacionDisponible[]> {
     const repositorio = manager ? manager.getRepository(Habitacion) : this.habitacionesRepository;
@@ -77,6 +77,7 @@ export class DisponibilidadService {
       .addSelect('MIN(d.cupos)', 'cuposMinimos')
       .addSelect("json_agg(json_build_object('date', d.fecha, 'price', d.precio) ORDER BY d.fecha)", 'desglose')
       .where('h.alojamientoId = :alojamiento', { alojamiento: criterio.alojamientoId })
+      .andWhere('h.activo = true')
       .andWhere('h.capacidadAdultos >= :adultos', { adultos: criterio.reparto.adultosPorHabitacion })
       .andWhere('h.capacidadNinos >= :ninos', { ninos: criterio.reparto.ninosPorHabitacion })
       .andWhere('d.fecha >= :checkin AND d.fecha < :checkout', { checkin: criterio.checkin, checkout: criterio.checkout })

@@ -65,6 +65,7 @@ export class AlojamientosService {
       .from(Habitacion, 'h')
       .innerJoin(DisponibilidadDiaria, 'd', 'd.habitacionId = h.id')
       .where('h.alojamientoId = a.id')
+      .andWhere('h.activo = true')
       .andWhere('h.capacidadAdultos >= :adultos')
       .andWhere('h.capacidadNinos >= :ninos')
       .andWhere('d.fecha >= :checkin AND d.fecha < :checkout')
@@ -198,7 +199,7 @@ export class AlojamientosService {
     const habitacionesPorAlojamiento = new Map<number, Habitacion[]>();
     if (extras.has('rooms') && alojamientos.length > 0) {
       const habitaciones = await this.habitacionesRepository.find({
-        where: { alojamientoId: Any(alojamientos.map((a) => a.id)) },
+        where: { alojamientoId: Any(alojamientos.map((a) => a.id)), activo: true },
         order: { precioBase: 'ASC', nombre: 'ASC' },
       });
       for (const h of habitaciones) {

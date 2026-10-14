@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
 
 // Guarda la respuesta de cada Idempotency-Key para devolver lo mismo si el cliente reintenta.
 @Entity('idempotency_keys')
@@ -21,6 +21,8 @@ export class IdempotencyKey {
   @Column({ type: 'varchar', length: 64 })
   requestHash: string;
 
-  @CreateDateColumn()
+  // Indexado para poder borrar las claves viejas sin recorrer toda la tabla.
+  @Index('IX_idempotency_keys_createdAt')
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

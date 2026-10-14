@@ -1,9 +1,12 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
+import { Check, Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { ColumnNumericTransformer } from '../../../common/transformers/column-numeric.transformer';
 import { Habitacion } from './habitacion.entity';
 
 // Una fila por habitación y por día: cuántos cupos quedan y a qué precio.
+// La clave primaria (habitacionId, fecha) también sirve de índice para la clave foránea habitacionId.
 @Entity('disponibilidad_diaria')
+@Check('CHK_disponibilidad_cupos', '"cupos" >= 0')
+@Check('CHK_disponibilidad_precio', '"precio" >= 0')
 export class DisponibilidadDiaria {
   @PrimaryColumn({ type: 'uuid' })
   habitacionId: string;

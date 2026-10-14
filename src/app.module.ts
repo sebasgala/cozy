@@ -24,7 +24,8 @@ import { AlojamientosModule } from './modules/alojamientos/alojamientos.module';
         type: 'postgres',
         url: configService.get<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        synchronize: configService.get<string>('NODE_ENV') !== 'production', // Precaución en producción
+        // El esquema lo crean SOLO las migraciones (npm run migration:run), también en desarrollo.
+        synchronize: false,
       }),
     }),
 

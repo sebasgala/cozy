@@ -1,6 +1,8 @@
 import {
+  Check,
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -10,6 +12,7 @@ import { ColumnNumericTransformer } from '../../../common/transformers/column-nu
 import { Ciudad } from './ciudad.entity';
 
 @Entity('alojamientos')
+@Check('CHK_alojamientos_precio_por_noche', '"precioPorNoche" >= 0')
 export class Alojamiento {
   // Entero autoincremental: el contrato define accommodation como integer
   @PrimaryGeneratedColumn()
@@ -47,6 +50,7 @@ export class Alojamiento {
   @Column({ type: 'varchar', length: 3, default: 'USD' })
   moneda: string;
 
+  @Index('IX_alojamientos_ciudadId')
   @Column({ type: 'int', nullable: true })
   ciudadId: number | null;
 
@@ -66,6 +70,6 @@ export class Alojamiento {
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

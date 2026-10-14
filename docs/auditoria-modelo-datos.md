@@ -4,6 +4,24 @@ Revisión del modelo de base de datos del módulo de alojamientos antes del paso
 disponibilidad) y del paso 8 (roles, login y propietario del alojamiento). Es un documento de **solo
 lectura**: describe el modelo tal como está, evalúa su robustez y propone mejoras, pero no cambia nada.
 
+## Estado tras el paso 7A
+
+El paso 7A implementó el bloque imprescindible (sección 7.1). Las secciones 2 a 6 describen el modelo **antes**
+de ese paso y se conservan como registro; el modelo vigente está en `docs/modelo-datos.md`.
+
+| Hallazgo | Estado | Cómo se resolvió |
+|---|---|---|
+| A1 Sin migraciones | **Resuelto** | `synchronize: false` siempre; `src/database/data-source.ts`; migraciones `InitialSchema` (línea base) y `ModeloRobusto`; scripts `migration:generate`, `migration:run`, `migration:revert` y `migration:show` |
+| A2 Sin CHECK | **Resuelto** | Checks en cupos, precios, totales, `checkout > checkin` y `habitacionesReservadas >= 1`. `ErroresBaseDatosFilter` traduce 23514, 23502, 23503 y 23505 a 400/409 problem+json |
+| A3 Sin usuarios ni roles | Pendiente | Paso 8 |
+| M1 Fechas nulas | **Resuelto** | `checkin` y `checkout` `NOT NULL` en órdenes y previews |
+| M2 Habitaciones desde el JSON | **Resuelto** | Columna `ordenes.habitacionesReservadas`; la cancelación la usa |
+| M3 Un preview, varias órdenes | **Resuelto** | `ordenes.previewId` con índice único y FK; el create bloquea el preview. Otra clave sobre un preview usado: 409 `ROOM_NO_LONGER_AVAILABLE` |
+| M4 Sin índices en FKs | **Resuelto** | Índices en todas las FKs, `ordenes_preview.expiresAt`, `ordenes.createdAt` e `idempotency_keys.createdAt` |
+| M5 ON DELETE y borrado de habitaciones | Parcial | `habitaciones.activo` (borrado lógico) y filtro en `/search`, `/availability`, `/details` y preview; un 23503 ya no es 500. Los `ON DELETE` no cambiaron (R2, paso 7B) |
+| M6 Fechas de auditoría | Parcial | `createdAt` y `updatedAt` pasaron a `timestamptz`. Faltan columnas de auditoría en otras tablas (R3) |
+| M7 a M9 | Pendientes | Bloque recomendable |
+
 ## 1. Alcance y cómo se verificó
 
 | Fuente | Qué se revisó |
@@ -425,9 +443,10 @@ ALTER TABLE ordenes ADD COLUMN "previewId" uuid
   REFERENCES ordenes_preview(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX uq_ordenes_preview ON ordenes("previewId") WHERE "previewId" IS NOT NULL;
 ```
-Un segundo `create` con el mismo preview y otra clave fallaría con 23505, y el servicio respondería un error
-(400 `VALIDATION_FAILED`, "la vista previa ya se usó"). Con la misma clave sigue devolviendo la respuesta
-guardada, como hoy.
+Un segundo `create` con el mismo preview y otra clave responde 409 `ROOM_NO_LONGER_AVAILABLE` ("la vista
+previa ya se usó"), en problem+json. Con la misma clave sigue devolviendo la respuesta guardada, como hoy.
+(Implementado en el paso 7A como índice único `UQ_ordenes_previewId`; se eligió 409 en lugar del 400 que
+proponía esta sección.)
 
 **I6. Índices para las consultas reales** (resuelve M4)
 
@@ -603,7 +622,7 @@ erDiagram
 | I2 Checks | Ninguno: los DTO ya rechazan esos valores con 400 | El filtro de errores debe traducir el código 23514 (check) a 400 y no a 500 |
 | I3 Fechas NOT NULL | Ninguno | Las entidades dejan de ser `string \| null`; desaparece la comprobación `!preview.checkin` |
 | I4 habitacionesReservadas | Ninguno: la respuesta sigue mostrando `rooms` | preview y create la guardan; cancel la usa en lugar de `guests` |
-| I5 Una orden por preview | Mismas rutas y códigos; un caso nuevo de 400 | create guarda `previewId` y traduce el 23505 de ese índice |
+| I5 Una orden por preview | Mismas rutas y códigos; un caso nuevo de 409 | create guarda `previewId` y traduce el 23505 de ese índice |
 | I6 Índices | Ninguno | Ninguno |
 | I7 timestamptz | Ninguno: `creation_date` ya se envía en ISO UTC | Solo las entidades |
 | R1 Usuarios y roles | El contrato ya define OAuth2 y `ownerId`: se empieza a cumplir | Paso 8: login, guards, filtro por propietario en el admin y por dueño en las órdenes |

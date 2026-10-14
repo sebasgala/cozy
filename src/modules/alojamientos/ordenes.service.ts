@@ -5,7 +5,7 @@ import { DataSource, EntityManager, QueryFailedError, Repository } from 'typeorm
 import { Alojamiento } from './entities/alojamiento.entity';
 import { Habitacion } from './entities/habitacion.entity';
 import { IdempotencyKey } from './entities/idempotency-key.entity';
-import { Orden, OrdenStatus } from './entities/orden.entity';
+import { Orden, OrdenStatus, UQ_ORDENES_LOCATOR, UQ_ORDENES_PREVIEW } from './entities/orden.entity';
 import { OrdenPreview } from './entities/orden-preview.entity';
 import { OrderPreviewRequestDto, OrderPreviewResponseDto } from './dto/order-preview.dto';
 import { OrderCreateRequestDto } from './dto/order-create.dto';
@@ -56,7 +56,7 @@ export class OrdenesService {
     const reparto = repartirHuespedes(request.guests);
     const alojamiento = await this.disponibilidadService.buscarAlojamientoActivo(request.accommodation_id, 'accommodation_id');
 
-    const habitacion = await this.habitacionesRepository.findOneBy({ id: oferta.habitacionId, alojamientoId: alojamiento.id });
+    const habitacion = await this.habitacionesRepository.findOneBy({ id: oferta.habitacionId, alojamientoId: alojamiento.id, activo: true });
     if (!habitacion) {
       const reason = `La habitación ${oferta.habitacionId} no existe en el alojamiento ${alojamiento.id}`;
       throw new RecursoNoEncontradoException(reason, [{ name: 'product_id', reason }]);
@@ -107,6 +107,7 @@ export class OrdenesService {
 
   // Idempotencia: misma clave + mismo cuerpo => la respuesta guardada (sin crear otra orden);
   // misma clave + cuerpo distinto => 422. Solo se guardan las creaciones exitosas.
+  // Un preview da una sola orden: otra clave sobre un preview ya usado => 409.
   async crear(idempotencyKey: string, request: OrderCreateRequestDto): Promise<RespuestaCreacion> {
     const huella = huellaDePeticion(request);
     const guardada = await this.clavesRepository.findOneBy({ key: idempotencyKey });
@@ -114,16 +115,18 @@ export class OrdenesService {
 
     for (let intento = 1; ; intento++) {
       try {
-        const body = await this.dataSource.transaction((manager) => this.crearEnTransaccion(manager, idempotencyKey, huella, request));
-        return { statusCode: 201, body };
+        return await this.dataSource.transaction((manager) => this.crearEnTransaccion(manager, idempotencyKey, huella, request));
       } catch (error) {
+        const violacion = this.violacionUnica(error);
         // Otra petición con la misma clave terminó primero: se responde lo que ella guardó.
-        if (this.esViolacionUnica(error, 'idempotency_keys')) {
+        if (violacion?.table === 'idempotency_keys') {
           const ganadora = await this.clavesRepository.findOneBy({ key: idempotencyKey });
           if (ganadora) return this.repetirRespuesta(ganadora, huella);
         }
+        // Respaldo del bloqueo del preview: el índice único también impide dos órdenes por preview.
+        if (violacion?.constraint === UQ_ORDENES_PREVIEW) throw this.previewYaUsado();
         // Colisión de localizador (casi imposible): se repite la transacción entera.
-        if (this.esViolacionUnica(error, 'ordenes') && intento < 3) continue;
+        if (violacion?.constraint === UQ_ORDENES_LOCATOR && intento < 3) continue;
         throw error;
       }
     }
@@ -135,13 +138,25 @@ export class OrdenesService {
     idempotencyKey: string,
     huella: string,
     request: OrderCreateRequestDto,
-  ): Promise<OrderDetailDto> {
+  ): Promise<RespuestaCreacion> {
+    // 1. Bloqueo del preview: dos creaciones sobre el mismo preview pasan de a una.
     const preview = esUuid(request.order_preview_id)
-      ? await manager.findOneBy(OrdenPreview, { id: request.order_preview_id })
+      ? await manager
+          .getRepository(OrdenPreview)
+          .createQueryBuilder('p')
+          .setLock('pessimistic_write')
+          .where('p.id = :id', { id: request.order_preview_id })
+          .getOne()
       : null;
-    if (!preview || !preview.checkin || !preview.checkout) {
+    if (!preview) {
       throw new ConsultaInvalidaException([{ name: 'order_preview_id', reason: 'La vista previa no existe' }]);
     }
+    // 2. Si mientras esperábamos el bloqueo terminó otra petición con la MISMA clave, se repite su respuesta.
+    const ganadora = await manager.findOneBy(IdempotencyKey, { key: idempotencyKey });
+    if (ganadora) return this.repetirRespuesta(ganadora, huella);
+    // 3. Con OTRA clave, un preview ya usado es un conflicto: no se crea una segunda orden.
+    if (await manager.existsBy(Orden, { previewId: preview.id })) throw this.previewYaUsado();
+
     if (preview.expiresAt.getTime() <= Date.now()) {
       throw new ConsultaInvalidaException([
         { name: 'order_preview_id', reason: 'La vista previa expiró: pide una nueva con /orders/preview' },
@@ -156,10 +171,10 @@ export class OrdenesService {
     const reparto = repartirHuespedes(preview.guests as { number_of_adults: number; number_of_rooms: number; children?: number[] });
     const noches = calcularNoches(preview.checkin, preview.checkout);
 
-    // 1. Bloqueo pesimista de las noches: otra creación sobre la misma habitación espera aquí.
+    // 4. Bloqueo pesimista de las noches: otra creación sobre la misma habitación espera aquí.
     await this.disponibilidadService.bloquearNoches(manager, preview.habitacionId, preview.checkin, preview.checkout);
 
-    // 2. Con las filas bloqueadas se recalcula disponibilidad y precio con la misma función compartida.
+    // 5. Con las filas bloqueadas se recalcula disponibilidad y precio con la misma función compartida.
     const [disponible] = await this.disponibilidadService.habitacionesDisponibles(
       {
         alojamientoId: alojamiento.id,
@@ -181,7 +196,7 @@ export class OrdenesService {
       throw new ConflictoException('PRICE_CHANGED', `El precio cambió de ${preview.totalPrice} a ${total}: pide una nueva vista previa`);
     }
 
-    // 3. Descuento de cupos, orden y clave de idempotencia, en la misma transacción.
+    // 6. Descuento de cupos, orden y clave de idempotencia, en la misma transacción.
     await this.disponibilidadService.descontarCupos(
       manager,
       preview.habitacionId,
@@ -197,6 +212,8 @@ export class OrdenesService {
         status: OrdenStatus.CONFIRMED, // pago simulado: se considera aprobado
         alojamientoId: alojamiento.id,
         habitacionId: preview.habitacionId,
+        previewId: preview.id,
+        habitacionesReservadas: reparto.habitaciones,
         guests: preview.guests,
         checkin: preview.checkin,
         checkout: preview.checkout,
@@ -219,7 +236,7 @@ export class OrdenesService {
       responseBody: detalle as any,
       requestHash: huella,
     });
-    return detalle;
+    return { statusCode: 201, body: detalle };
   }
 
   private repetirRespuesta(guardada: IdempotencyKey, huella: string): RespuestaCreacion {
@@ -258,8 +275,8 @@ export class OrdenesService {
       if (!orden) throw this.ordenNoEncontrada(orderId);
       if (orden.status === OrdenStatus.CANCELLED) return;
 
-      const reparto = repartirHuespedes(orden.guests as { number_of_adults: number; number_of_rooms: number; children?: number[] });
-      await this.disponibilidadService.devolverCupos(manager, orden.habitacionId, orden.checkin, orden.checkout, reparto.habitaciones);
+      // Devuelve exactamente los cupos que se descontaron al crear (columna, no el JSON de huéspedes).
+      await this.disponibilidadService.devolverCupos(manager, orden.habitacionId, orden.checkin, orden.checkout, orden.habitacionesReservadas);
       orden.status = OrdenStatus.CANCELLED;
       await manager.save(orden);
     });
@@ -277,7 +294,6 @@ export class OrdenesService {
   }
 
   private aDetalle(orden: Orden, nombreAlojamiento: string, nombreHabitacion: string, cancellationType: string | null): OrderDetailDto {
-    const guests = orden.guests as { number_of_rooms: number };
     const base = `/api/v1/orders/${orden.id}`;
     return {
       order_id: orden.id,
@@ -292,7 +308,7 @@ export class OrdenesService {
         checkin: orden.checkin,
         checkout: orden.checkout,
         nights: calcularNoches(orden.checkin, orden.checkout),
-        rooms: guests.number_of_rooms,
+        rooms: orden.habitacionesReservadas,
         guests: orden.guests,
       },
       total_price: Number(orden.totalPrice),
@@ -310,8 +326,17 @@ export class OrdenesService {
     return new RecursoNoEncontradoException(reason, [{ name: 'orderId', reason }]);
   }
 
-  private esViolacionUnica(error: unknown, tabla: string): boolean {
-    const driver = error instanceof QueryFailedError ? (error.driverError as { code?: string; table?: string }) : undefined;
-    return driver?.code === '23505' && driver?.table === tabla;
+  private previewYaUsado(): ConflictoException {
+    return new ConflictoException(
+      'ROOM_NO_LONGER_AVAILABLE',
+      'La vista previa ya se usó para crear una orden: pide una nueva con /orders/preview',
+      [{ name: 'order_preview_id', reason: 'ya se usó para crear una orden' }],
+    );
+  }
+
+  // Datos de una violación de UNIQUE (23505) de PostgreSQL; undefined si el error es otro.
+  private violacionUnica(error: unknown): { table?: string; constraint?: string } | undefined {
+    const driver = error instanceof QueryFailedError ? (error.driverError as { code?: string; table?: string; constraint?: string }) : undefined;
+    return driver?.code === '23505' ? driver : undefined;
   }
 }
